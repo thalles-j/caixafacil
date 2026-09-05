@@ -21,7 +21,7 @@ import Pagination from '../components/Pagination';
 import type { Cliente, Conta, FormaPagamento, LancamentoManual, TipoConta } from '../types';
 import FinanceNav from '../components/FinanceNav';
 import { getPagination, paginateItems } from '../lib/pagination';
-import { whatsappChargeUrl } from '../lib/whatsapp';
+import { buildWhatsAppChargeUrl } from '../lib/whatsapp';
 
 type ItemParaExcluir = { tipo: 'conta' | 'lancamento'; id: string; label: string };
 type BaixaPendente = { tipo: 'fiado' | 'fixa'; id: string; nome: string; valor: number };
@@ -361,6 +361,16 @@ export default function Financas() {
                   const venceHoje = conta.vencimento === hoje && !conta.quitado;
                   const atrasada = !conta.quitado && conta.vencimento < hoje;
                   const cliente = conta.clienteId ? clientesPorId.get(conta.clienteId) : undefined;
+                  const whatsappUrl = !conta.quitado && conta.tipo === 'receber' && cliente
+                    ? buildWhatsAppChargeUrl({
+                        telefone: cliente.telefone,
+                        clienteNome: cliente.nome,
+                        valor: conta.valor,
+                        descricao: conta.descricao,
+                        vencimento: conta.vencimento,
+                        nomeNegocio: data.config?.nome,
+                      })
+                    : null;
                   return (
                     <li
                       key={conta.id}
@@ -418,9 +428,9 @@ export default function Financas() {
                           {formatCurrency(conta.valor)}
                         </p>
                         <div className="flex items-center gap-1">
-                          {!conta.quitado && conta.tipo === 'receber' && whatsappChargeUrl(cliente?.telefone, cliente?.nome ?? 'cliente', conta.valor) && (
+                          {whatsappUrl && (
                             <a
-                              href={whatsappChargeUrl(cliente?.telefone, cliente?.nome ?? 'cliente', conta.valor) ?? undefined}
+                              href={whatsappUrl}
                               target="_blank"
                               rel="noreferrer noopener"
                               aria-label={`Cobrar ${cliente?.nome ?? 'cliente'} pelo WhatsApp`}
@@ -517,32 +527,42 @@ export default function Financas() {
                 <h3 className="text-xs font-bold uppercase tracking-wide text-ink-soft">Por Cliente</h3>
               </div>
               <ul className="divide-y divide-line">
-                {clientesPaginados.items.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between gap-2 py-2 text-sm">
-                    <div className="min-w-0">
-                      <p className="truncate text-ink">{c.nome}</p>
-                      {c.telefone && (
-                        <p className="flex items-center gap-1 truncate text-[11px] text-ink-soft">
-                          <Phone size={11} className="shrink-0" /> {c.telefone}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {whatsappChargeUrl(c.telefone, c.nome, c.total) && (
+                {clientesPaginados.items.map((c) => {
+                  const whatsappUrl = buildWhatsAppChargeUrl({
+                    telefone: c.telefone,
+                    clienteNome: c.nome,
+                    valor: c.total,
+                    nomeNegocio: data.config?.nome,
+                  });
+                  return (
+                    <li key={c.id} className="py-2 text-sm">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-ink">{c.nome}</p>
+                          {c.telefone && (
+                            <p className="flex items-center gap-1 truncate text-[11px] text-ink-soft">
+                              <Phone size={11} className="shrink-0" /> {c.telefone}
+                            </p>
+                          )}
+                        </div>
+                        <span className="shrink-0 font-ledger font-bold tabular-nums text-brass">{formatCurrency(c.total)}</span>
+                      </div>
+                      {whatsappUrl ? (
                         <a
-                          href={whatsappChargeUrl(c.telefone, c.nome, c.total) ?? undefined}
+                          href={whatsappUrl}
                           target="_blank"
                           rel="noreferrer noopener"
                           aria-label={`Cobrar ${c.nome} pelo WhatsApp`}
-                          className="rounded-lg bg-[#25D366]/15 p-2 text-[#128C4A] transition hover:bg-[#25D366]/25 dark:text-[#56e48d]"
+                          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#25D366]/15 px-2 py-1.5 text-xs font-bold text-[#128C4A] dark:text-[#55e781]"
                         >
-                          <WhatsappLogo size={16} weight="fill" />
+                          <WhatsappLogo size={15} weight="fill" /> Cobrar via WhatsApp
                         </a>
+                      ) : (
+                        <p className="mt-1 text-[11px] text-ink-soft">Cadastre o telefone para cobrar pelo WhatsApp.</p>
                       )}
-                      <span className="font-ledger font-bold tabular-nums text-brass">{formatCurrency(c.total)}</span>
-                    </div>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
               <Pagination
                 currentPage={clientesPaginados.currentPage}

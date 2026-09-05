@@ -61,7 +61,7 @@ export async function loadBootstrapData(user: UserIdentity) {
           ORDER BY created_at, name
         `, [user.id]);
     const creditsResult = await client.query(`
-          SELECT cs.id, cs.sale_id, cs.customer_id, cs.amount, cs.status,
+          SELECT cs.id, cs.sale_id, cs.customer_id, cs.amount, cs.paid_amount, cs.status,
                  cs.due_date, cs.paid_at, cs.created_at,
                  (
                    SELECT si.id
@@ -257,7 +257,9 @@ export async function loadBootstrapData(user: UserIdentity) {
         id: credit.id,
         tipo: 'receber',
         descricao: credit.description,
-        valor: Number(credit.amount),
+        valor: credit.status === 'pago'
+          ? Number(credit.amount)
+          : Number(credit.amount) - Number(credit.paid_amount),
         vencimento: isoDate(credit.due_date ?? credit.created_at),
         quitado: credit.status === 'pago',
         dataQuitacao: isoDate(credit.paid_at),

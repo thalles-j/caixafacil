@@ -75,6 +75,18 @@ describe('requisições financeiras', () => {
     expect(body).toMatchObject({ type: 'entrada', paymentMethod: 'pix', entryKind: 'produto' });
   });
 
+  it('envia o item do catálogo ao resolver uma entrada pendente', async () => {
+    const fetchMock = mockSuccess();
+
+    await resolveTransactionIdentificationRequest('transaction-1', 'produto', 'product-1');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('/transactions/transaction-1/identification');
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      classification: 'produto',
+      productId: 'product-1',
+    });
+  });
+
   it('envia a categoria da despesa e permite resolver uma pendência depois', async () => {
     const fetchMock = mockSuccess();
 

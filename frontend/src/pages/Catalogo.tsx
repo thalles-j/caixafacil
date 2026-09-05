@@ -21,6 +21,12 @@ const OPCOES_ORDENACAO: ReadonlyArray<{ valor: OrdenacaoCatalogo; label: string 
   { valor: 'menos-vendidos', label: 'Menos vendidos' },
 ];
 
+function obterTipoItem(item: Produto): 'product' | 'service' {
+  const tipoPersistido = (item as Produto & { type?: unknown }).type;
+  if (tipoPersistido === 'product' || tipoPersistido === 'service') return tipoPersistido;
+  return item.duracao ? 'service' : 'product';
+}
+
 export default function Catalogo() {
   const {
     data,
@@ -71,16 +77,17 @@ export default function Catalogo() {
   }, [data.vendas]);
 
   const itensPermitidos = useMemo(
-    () => data.produtos.filter((item) => catalogTypesForOffer(oferta).includes(item.type)),
+    () => data.produtos.filter((item) => catalogTypesForOffer(oferta).includes(obterTipoItem(item))),
     [data.produtos, oferta],
   );
 
   const itensFiltrados = useMemo(() => {
     const filtrados = itensPermitidos.filter((item) => {
-      if (tipoFiltroEfetivo === 'product' && item.type !== 'product') return false;
-      if (tipoFiltroEfetivo === 'service' && item.type !== 'service') return false;
+      const tipoItem = obterTipoItem(item);
+      if (tipoFiltroEfetivo === 'product' && tipoItem !== 'product') return false;
+      if (tipoFiltroEfetivo === 'service' && tipoItem !== 'service') return false;
       if (filtroEfetivo === 'baixo') {
-        return item.type === 'product' && (item.quantidade ?? 0) <= (item.quantidadeMinima ?? 0);
+        return tipoItem === 'product' && (item.quantidade ?? 0) <= (item.quantidadeMinima ?? 0);
       }
       if (filtroEfetivo !== 'todos' && item.categoria !== filtroEfetivo) return false;
       if (!busca.trim()) return true;
@@ -95,13 +102,15 @@ export default function Catalogo() {
     setProdutoEditando(null);
     setItemType(tipoPadrao);
     setCatalogoErro(null);
+    setConfirmarRemocaoAberto(false);
     setModalAberto(true);
   };
 
   const abrirEdicao = (produto: Produto) => {
     setProdutoEditando(produto);
-    setItemType(produto.type);
+    setItemType(obterTipoItem(produto));
     setCatalogoErro(null);
+    setConfirmarRemocaoAberto(false);
     setModalAberto(true);
   };
 
@@ -255,7 +264,7 @@ export default function Catalogo() {
   };
 
   const quantidadeBaixa = (item: Produto) => {
-    return item.type === 'product' && (item.quantidade ?? 0) <= (item.quantidadeMinima ?? 0);
+    return obterTipoItem(item) === 'product' && (item.quantidade ?? 0) <= (item.quantidadeMinima ?? 0);
   };
 
   return (
@@ -402,6 +411,7 @@ export default function Catalogo() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {itensPaginados.items.map((item) => {
             const baixo = quantidadeBaixa(item);
+            const tipoItem = obterTipoItem(item);
             return (
               <div
                 key={item.id}
@@ -411,7 +421,7 @@ export default function Catalogo() {
               >
                 <div className="flex items-start gap-3">
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-line/40 text-ledger-strong dark:text-ledger">
-                    {item.type === 'product' ? <Package size={22} /> : <Wrench size={22} />}
+                    {tipoItem === 'product' ? <Package size={22} /> : <Wrench size={22} />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -429,7 +439,7 @@ export default function Catalogo() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  {item.type === 'product' ? (
+                  {tipoItem === 'product' ? (
                     <span className={`stamp ${baixo ? 'text-stamp' : 'text-ink-soft'}`}>
                       {item.quantidade ?? 0} em estoque
                     </span>

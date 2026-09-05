@@ -530,7 +530,8 @@ export default function Caixa() {
               <button
                 key={forma}
                 onClick={() => selecionarForma(forma)}
-                className={`flex flex-col items-center gap-1 rounded-lg py-2 text-xs font-medium ${classes} ${
+                aria-pressed={formaSelecionada === forma}
+                className={`selection-option flex flex-col items-center gap-1 rounded-lg py-2 text-xs font-medium ${classes} ${
                   formaSelecionada === forma ? 'ring-2 ring-ledger' : ''
                 }`}
               >

@@ -182,7 +182,8 @@ export default function Onboarding() {
                         key={ramo}
                         type="button"
                         onClick={() => setCategoria(ramo)}
-                        className={`flex flex-col items-center gap-2 rounded-2xl border-2 p-3 text-center transition ${
+                        aria-pressed={selecionado}
+                        className={`selection-option flex flex-col items-center gap-2 rounded-2xl border-2 p-3 text-center ${
                           selecionado ? 'border-ledger bg-ledger/10' : 'border-line bg-paper'
                         }`}
                       >
@@ -210,7 +211,8 @@ export default function Onboarding() {
                     key={valor}
                     type="button"
                     onClick={() => selecionarOferta(valor)}
-                    className={`w-full rounded-xl border-2 px-4 py-3 text-left text-sm font-medium transition ${
+                    aria-pressed={oferta === valor}
+                    className={`selection-option w-full rounded-xl border-2 px-4 py-3 text-left text-sm font-medium ${
                       oferta === valor ? 'border-ledger bg-ledger/10 text-ledger-strong' : 'border-line bg-paper text-ink'
                     }`}
                   >
@@ -239,7 +241,8 @@ export default function Onboarding() {
                       type="button"
                       onClick={() => setNovaDespesaNome(sugestao)}
                       title={`Usar ${sugestao}`}
-                      className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-xs font-semibold transition ${
+                      aria-pressed={novaDespesaNome === sugestao}
+                      className={`selection-option flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-xs font-semibold ${
                         novaDespesaNome === sugestao
                           ? 'border-ledger bg-ledger/10 text-ledger-strong'
                           : 'border-line bg-paper text-ink-soft hover:border-ledger/40 hover:text-ink'
@@ -281,7 +284,10 @@ export default function Onboarding() {
 
                 <fieldset>
                   <legend className="mb-2 text-[10px] font-bold uppercase tracking-wide text-ink-soft">Com que frequência?</legend>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div
+                    data-choice-position={novaDespesaRecorrencia === 'semanal' ? 'second' : 'first'}
+                    className="segmented-slider segmented-slider-2 grid grid-cols-2 rounded-xl bg-line/40 p-1"
+                  >
                     {([
                       ['mensal', 'Todo mês'],
                       ['semanal', 'Toda semana'],
@@ -365,7 +371,10 @@ export default function Onboarding() {
                 <label className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-ink-soft">
                   Painel Inicial mostra números de:
                 </label>
-                <div className="flex gap-2">
+                <div
+                  data-choice-position={viewPeriod === 'week' ? 'second' : 'first'}
+                  className="segmented-slider segmented-slider-2 grid grid-cols-2 rounded-xl bg-line/40 p-1"
+                >
                   <button
                     type="button"
                     aria-pressed={viewPeriod === 'day'}

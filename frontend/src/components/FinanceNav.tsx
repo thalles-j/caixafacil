@@ -16,7 +16,7 @@ export default function FinanceNav() {
           to={to}
           end={end}
           className={({ isActive }) =>
-            `shrink-0 rounded-full border px-3 py-2 text-xs font-semibold transition ${
+            `selection-option shrink-0 rounded-full border px-3 py-2 text-xs font-semibold ${
               isActive
                 ? 'border-ledger bg-ledger text-paper'
                 : 'border-line bg-paper-raised text-ink-soft hover:border-ledger/40 hover:text-ink'
