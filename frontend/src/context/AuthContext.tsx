@@ -16,9 +16,10 @@ import {
   touchSessionRequest,
   unlockSessionRequest,
   lockStoredSession,
+  switchBusinessRequest,
 } from '../lib/auth';
 import SessionLock from '../components/SessionLock';
-import { APP_DATA_CHANGED_EVENT } from '../lib/storage';
+import { APP_DATA_CHANGED_EVENT, APP_TENANT_SWITCHING_EVENT } from '../lib/storage';
 
 interface AuthUser {
   id: string;
@@ -28,6 +29,7 @@ interface AuthUser {
   tenantId?: string | null;
   tenantRole?: 'OWNER' | 'OPERATOR' | null;
   idleTimeoutMinutes?: number;
+  businessName?: string | null;
 }
 
 interface AuthContextValue {
@@ -41,6 +43,7 @@ interface AuthContextValue {
   logout: () => Promise<void>;
   locked: boolean;
   unlock: (password: string) => Promise<void>;
+  switchBusiness: (businessId: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -183,6 +186,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return response.message;
   };
 
+  const switchBusiness = async (businessId: string) => {
+    const previousToken = getStoredToken();
+    window.dispatchEvent(new Event(APP_TENANT_SWITCHING_EVENT));
+    try {
+      const session = await switchBusinessRequest(businessId);
+      setStoredToken(session.token);
+      setUser(session.user);
+      window.dispatchEvent(new CustomEvent(APP_DATA_CHANGED_EVENT, { detail: session.data }));
+    } catch (error) {
+      if (previousToken) {
+        const previous = await sessionRequest(previousToken);
+        window.dispatchEvent(new CustomEvent(APP_DATA_CHANGED_EVENT, { detail: previous.data }));
+      }
+      throw error;
+    }
+  };
+
   const value: AuthContextValue = {
     user,
     isAuthenticated: user !== null,
@@ -194,6 +214,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     logout,
     locked,
     unlock,
+    switchBusiness,
   };
 
   return <AuthContext.Provider value={value}>{children}{locked && user && <SessionLock onUnlock={unlock} onLogout={logout} />}</AuthContext.Provider>;

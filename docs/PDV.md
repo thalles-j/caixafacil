@@ -1,5 +1,10 @@
 # PDV físico e operação sem rede
 
+Cada operador é vinculado por `business_memberships.business_id` a um único
+negócio. O backend revalida esse vínculo em cada requisição, e a fila offline
+inclui negócio e ator na identidade; uma venda pendente não é enviada depois
+que o dono troca para outro negócio.
+
 ## Cupons e gaveta
 
 O cupom é não fiscal. A configuração da loja define bobina de 58 ou 80 mm,

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { CalendarBlank, CaretRight, ChartBar, FilePdf, Receipt, TrendDown, TrendUp } from '@phosphor-icons/react';
 import { useAppData } from '../context/AppDataContext';
@@ -13,6 +13,7 @@ import {
   type MovimentoDiario,
   type ProdutoAgrupado,
 } from '../lib/reporting';
+import { consolidatedReport, type ConsolidatedReport } from '../lib/businesses';
 
 export default function Relatorios() {
   const { data } = useAppData();
@@ -27,7 +28,15 @@ export default function Relatorios() {
   const [diaSelecionado, setDiaSelecionado] = useState(ultimaData);
   const [semanaSelecionada, setSemanaSelecionada] = useState(semanaISO(ultimaData));
   const [mesSelecionado, setMesSelecionado] = useState(ultimaData.slice(0, 7));
+  const [escopo, setEscopo] = useState<'individual'|'geral'>('individual');
+  const [visaoGeral,setVisaoGeral]=useState<ConsolidatedReport|null>(null);
   const inicioSemana = inicioDaSemanaISO(semanaSelecionada);
+  useEffect(()=>{
+    if(escopo!=='geral'||!/^\d{4}-\d{2}$/.test(mesSelecionado)) return;
+    const [year,month]=mesSelecionado.split('-').map(Number);
+    const end=`${mesSelecionado}-${String(new Date(year,month,0).getDate()).padStart(2,'0')}`;
+    void consolidatedReport(`${mesSelecionado}-01`,end).then(setVisaoGeral).catch(()=>setVisaoGeral(null));
+  },[escopo,mesSelecionado]);
 
   const movimentosDoMes = useMemo(
     () =>
@@ -56,6 +65,12 @@ export default function Relatorios() {
         <p className="mt-1 text-sm text-ink-soft">Escolha o período, abra o relatório completo e salve em PDF.</p>
       </header>
 
+      <div className="mb-5 grid grid-cols-2 rounded-xl border border-line bg-line/30 p-1" aria-label="Escopo dos relatórios">
+        <button onClick={()=>setEscopo('individual')} className={`rounded-lg px-3 py-2 text-sm font-semibold ${escopo==='individual'?'bg-paper-raised text-ink shadow-sm':'text-ink-soft'}`}>Negócio atual</button>
+        <button onClick={()=>setEscopo('geral')} className={`rounded-lg px-3 py-2 text-sm font-semibold ${escopo==='geral'?'bg-paper-raised text-ink shadow-sm':'text-ink-soft'}`}>Todos os negócios</button>
+      </div>
+      {escopo==='geral'&&<p className="mb-4 rounded-xl bg-ledger/10 p-3 text-xs text-ledger-strong dark:text-ledger">A visão geral soma os negócios vinculados ao seu login. Você poderá escolher quais entram no extrato.</p>}
+
       <section className="grid gap-4 lg:grid-cols-3">
         <GeradorRelatorio
           Icon={Receipt}
@@ -66,7 +81,7 @@ export default function Relatorios() {
           valor={diaSelecionado}
           aoAlterar={setDiaSelecionado}
           detalhe={diaSelecionado ? `Fechamento de ${formatDate(diaSelecionado)}` : ''}
-          rota={diaSelecionado ? `/relatorios/diario/${diaSelecionado}` : ''}
+          rota={diaSelecionado ? escopo==='geral'?`/relatorios/consolidado/diario/${diaSelecionado}`:`/relatorios/diario/${diaSelecionado}` : ''}
         />
         <GeradorRelatorio
           Icon={CalendarBlank}
@@ -77,7 +92,7 @@ export default function Relatorios() {
           valor={semanaSelecionada}
           aoAlterar={setSemanaSelecionada}
           detalhe={inicioSemana ? `${formatDate(inicioSemana)} a ${formatDate(somarDias(inicioSemana, 6))}` : ''}
-          rota={inicioSemana ? `/relatorios/semanal/${inicioSemana}` : ''}
+          rota={inicioSemana ? escopo==='geral'?`/relatorios/consolidado/semanal/${inicioSemana}`:`/relatorios/semanal/${inicioSemana}` : ''}
         />
         <GeradorRelatorio
           Icon={ChartBar}
@@ -88,11 +103,13 @@ export default function Relatorios() {
           valor={mesSelecionado}
           aoAlterar={setMesSelecionado}
           detalhe={tituloMes}
-          rota={mesSelecionado ? `/relatorios/mensal/${mesSelecionado}` : ''}
+          rota={mesSelecionado ? escopo==='geral'?`/relatorios/consolidado/mensal/${mesSelecionado}`:`/relatorios/mensal/${mesSelecionado}` : ''}
         />
       </section>
 
-      <section className="mt-7 border-t border-line pt-7">
+      {escopo==='geral'&&visaoGeral&&<section className="mt-7 border-t border-line pt-7"><div className="flex flex-wrap items-end justify-between gap-2"><div><p className="font-ledger text-[10px] font-bold uppercase tracking-[.18em] text-ink-soft">Visão rápida consolidada</p><h3 className="mt-1 font-display text-xl font-bold">{tituloMes}</h3></div><p className="text-xs text-ink-soft">{visaoGeral.businesses.map(b=>b.name).join(' + ')}</p></div><div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">{[['Vendas',visaoGeral.totals.sales],['Entradas',visaoGeral.totals.entries],['Saídas',visaoGeral.totals.outputs],['Saldo',visaoGeral.totals.entries-visaoGeral.totals.outputs]].map(([label,value])=><div key={String(label)} className="rounded-xl border border-line bg-paper-raised p-4"><p className="text-[10px] font-bold uppercase text-ink-soft">{label}</p><p className="mt-1 font-ledger text-lg font-bold">{formatCurrency(Number(value))}</p></div>)}</div></section>}
+
+      <section className={`mt-7 border-t border-line pt-7 ${escopo==='geral'?'hidden':''}`}>
         <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
           <div>
             <p className="font-ledger text-[10px] font-bold uppercase tracking-[0.18em] text-ink-soft">Visão rápida</p>

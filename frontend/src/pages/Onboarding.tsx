@@ -41,14 +41,14 @@ const DESPESAS_SUGERIDAS = [
 ];
 
 export default function Onboarding() {
-  const { setConfig, cadastrarDespesaFixaNoBanco } = useAppData();
+  const { data, setConfig, cadastrarDespesaFixaNoBanco } = useAppData();
   const navigate = useNavigate();
 
   const [step, setStep] = useState(0);
 
-  const [nome, setNome] = useState('');
-  const [categoria, setCategoria] = useState<string>(RAMOS_ATUACAO[0]);
-  const [oferta, setOferta] = useState<Oferta>('ambos');
+  const [nome, setNome] = useState(data.config?.nome ?? '');
+  const [categoria, setCategoria] = useState<string>(data.config?.categoria ?? RAMOS_ATUACAO[0]);
+  const [oferta, setOferta] = useState<Oferta>(data.config?.oferta ?? 'ambos');
   const [despesasFixas, setDespesasFixas] = useState<DespesaFixa[]>([]);
   const [novaDespesaNome, setNovaDespesaNome] = useState('');
   const [novaDespesaValor, setNovaDespesaValor] = useState('');

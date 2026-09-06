@@ -2,6 +2,7 @@ import type { AppData, CategoriaProduto, Produto } from '../types';
 
 export const STORAGE_KEY = 'mnb-data-v1';
 export const APP_DATA_CHANGED_EVENT = 'mnb-app-data-changed';
+export const APP_TENANT_SWITCHING_EVENT = 'mnb-tenant-switching';
 
 export function storageKeyForUser(userId?: string | null): string {
   return userId ? `${STORAGE_KEY}:${userId}` : STORAGE_KEY;

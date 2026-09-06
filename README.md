@@ -90,14 +90,28 @@ npm run db:seed -- --reset
 Esse modo remove dados do banco apontado por `DATABASE_URL`; use somente em
 desenvolvimento.
 
-Cada uma das três contas de demonstração recebe um catálogo com 30 itens,
-clientes, fiados em diferentes situações, despesas fixas, movimentações e mais
-de 15 fechamentos. Também são criados dados históricos de janeiro a abril para
-testar filtros, paginação e relatórios. As credenciais são:
+Para recriar apenas as contas de demonstração e preservar todas as demais
+contas do banco, use:
+
+```bash
+npm run db:seed -- --refresh-demo
+```
+
+Cada uma das três contas de demonstração recebe três negócios independentes.
+Cada negócio possui catálogo com 30 itens, 22 clientes, operador próprio,
+consentimentos de WhatsApp, fiados em diferentes situações, despesas fixas,
+movimentações, caixa aberto, 20 fechamentos e uma trilha de auditoria com ações
+de OWNER e OPERATOR. Também são criados dados históricos de janeiro a abril
+para testar troca e consolidação de negócios, filtros, paginação e relatórios.
+Use `--reset` para recriar contas que já existam com toda essa massa. As
+credenciais dos proprietários são:
 
 - `thalles@gmail.com` / `Teste123@`;
 - `gustavo@gmail.com` / `Teste123@`;
 - `marco@gmail.com` / `Teste123@`.
+
+Os operadores seguem o formato `operador.<negócio>.<email-do-dono>` e usam a
+senha `Operador123@`. Exemplo: `operador.cafeteria.thalles@gmail.com`.
 
 O seed também cria três contas administrativas puras, sem catálogo, clientes,
 vendas, fiado ou caixas de demonstração:
@@ -118,10 +132,12 @@ nome exibido no modal, são confirmadas novamente pelo backend e deixam registro
 de auditoria. O próprio admin altera seu nome e senha em `/admin/configuracoes`.
 
 As operações autenticadas usam `withTenantTransaction` em
-`backend/src/db.ts`, mantendo o tenant dentro da transação e garantindo as
-políticas de RLS no pool do Neon.
+`backend/src/db.ts`. O backend confirma o vínculo do login com o negócio em
+cada requisição e só então define `app.current_business_id` dentro da
+transação, garantindo as políticas de RLS no pool do Neon.
 
-Cada estabelecimento possui um OWNER e pode criar operadores em `/operadores`.
+Um OWNER pode administrar até três negócios independentes em `/negocios` e
+alternar entre eles sem refazer o login. Cada negócio pode criar operadores em `/operadores`.
 Operadores têm credenciais próprias e acesso ao catálogo, clientes, caixa e
 vendas da sessão aberta para devoluções confirmadas; as
 configurações, relatórios, backup e gestão da conta permanecem com o OWNER.
@@ -189,5 +205,6 @@ encaminha a resposta para o endereço configurado em `SUPPORT_EMAIL`.
 Defina também `VITE_SUPPORT_EMAIL` no frontend para exibir um link direto de
 e-mail caso o provedor esteja temporariamente indisponível.
 
-A API expõe `GET /api/health` para health checks. O frontend é um build estático
-e não precisa acessar diretamente o PostgreSQL.
+A API expõe `GET /api/health` para health checks e só responde `200` quando
+também consegue consultar o PostgreSQL. O frontend é um build estático e não
+precisa acessar diretamente o banco.

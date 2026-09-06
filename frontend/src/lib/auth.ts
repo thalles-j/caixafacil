@@ -85,14 +85,17 @@ const API_URL = import.meta.env.VITE_API_URL ?? '/api';
 
 export type AuthResponse = {
   token: string;
-  user: { id: string; email: string; name?: string | null; role: 'client' | 'admin'; tenantId?: string | null; tenantRole?: 'OWNER' | 'OPERATOR' | null; idleTimeoutMinutes?: number };
+  user: { id: string; email: string; name?: string | null; role: 'client' | 'admin'; tenantId?: string | null; tenantRole?: 'OWNER' | 'OPERATOR' | null; businessName?: string | null; idleTimeoutMinutes?: number };
   data?: AppData | null;
   locked?: boolean;
 };
 export type SessionResponse = Omit<AuthResponse, 'token'>;
 export type AccountBackup = {
   format: 'caixafacil-postgres-backup';
-  version: 3;
+  version: 4;
+  scope: 'active-business';
+  businessId: string;
+  ownerUserId: string;
   exportedAt: string;
   tables: Record<string, unknown[]>;
 };
@@ -175,6 +178,16 @@ export async function logoutRequest(): Promise<void> {
   if (!res.ok && res.status !== 401) {
     throw new Error('Não foi possível encerrar a sessão no servidor.');
   }
+}
+
+export async function switchBusinessRequest(businessId: string): Promise<AuthResponse> {
+  const token = await ensureStoredAccessToken();
+  const res = await observedFetch(`${API_URL}/auth/business/switch`, {
+    method: 'POST', credentials: 'include',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ businessId }),
+  });
+  return parseJsonOrThrow(res);
 }
 
 export function lockStoredSession() { sessionLocked = true; }

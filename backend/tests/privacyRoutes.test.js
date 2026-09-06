@@ -92,7 +92,7 @@ describe('privacidade dos clientes', () => {
     const handler = action === 'charge' ? whatsappChargeHandler : action === 'consent' ? recordConsentHandler : anonymizeCustomerHandler;
     await expect(handler(req, response())).rejects.toMatchObject({ status: 404 });
     expect(mocks.transaction).toHaveBeenCalledWith(tenantA, expect.any(Function));
-    expect(mocks.query.mock.calls[0][0]).toContain('WHERE user_id = $1 AND id = $2');
+    expect(mocks.query.mock.calls[0][0]).toContain('WHERE business_id = $1 AND id = $2');
     expect(mocks.query.mock.calls[0][1]).toEqual([tenantA, customerB]);
     expect(mocks.query).toHaveBeenCalledTimes(1);
     expect(mocks.audit).not.toHaveBeenCalled();
@@ -109,7 +109,7 @@ describe('privacidade dos clientes', () => {
     expect(updates[1][0]).toContain("description = 'Venda — cliente anonimizado'");
     expect(updates[2][0]).toContain('credit_sale_id IN');
     for (const [sql, values] of updates) {
-      expect(sql).toContain('WHERE user_id = $1');
+      expect(sql).toContain('WHERE business_id = $1');
       expect(values[0]).toBe(tenantA);
       expect(sql.slice(sql.indexOf('SET'), sql.indexOf('WHERE'))).not.toMatch(/\b(?:amount|paid_amount|total_amount|quantity|customer_id|sale_id)\s*=/i);
       expect(sql).not.toMatch(/DELETE|TRUNCATE/i);

@@ -21,7 +21,7 @@ export async function loadBootstrapData(user: UserIdentity) {
                  daily_sales_goal, report_frequency, report_by_email, report_email,
                  view_period, onboarding_completed, idle_timeout_minutes, receipt_settings
           FROM business_settings
-          WHERE user_id = $1
+          WHERE business_id = $1
         `, [user.id]);
     const productsResult = await client.query(`
           SELECT p.id, p.kind, p.name, p.barcode, p.sale_price, p.cost_price, p.created_at,
@@ -30,19 +30,19 @@ export async function loadBootstrapData(user: UserIdentity) {
                  COALESCE((
                    SELECT SUM(si.quantity)
                    FROM sale_items si
-                   JOIN sales s ON s.user_id = si.user_id AND s.id = si.sale_id
-                   WHERE si.user_id = p.user_id AND si.product_id = p.id
+                   JOIN sales s ON s.business_id = si.business_id AND s.id = si.sale_id
+                   WHERE si.business_id = p.business_id AND si.product_id = p.id
                      AND s.status = 'completed'
                  ), 0) AS sold_quantity
           FROM products p
-          LEFT JOIN categories c ON c.user_id = p.user_id AND c.id = p.category_id
-          WHERE p.user_id = $1 AND p.active
+          LEFT JOIN categories c ON c.business_id = p.business_id AND c.id = p.category_id
+          WHERE p.business_id = $1 AND p.active
           ORDER BY p.created_at, p.name
         `, [user.id]);
     const categoriesResult = await client.query(`
           SELECT id, name
           FROM categories
-          WHERE user_id = $1
+          WHERE business_id = $1
           ORDER BY created_at, name
         `, [user.id]);
     const salesResult = await client.query(`
@@ -51,15 +51,15 @@ export async function loadBootstrapData(user: UserIdentity) {
                  s.cash_session_id, s.sold_at, s.payment_method, s.returned_amount,
                  p.kind AS product_kind
           FROM sale_items si
-          JOIN sales s ON s.user_id = si.user_id AND s.id = si.sale_id
-          LEFT JOIN products p ON p.user_id = si.user_id AND p.id = si.product_id
-          WHERE si.user_id = $1 AND s.status = 'completed'
+          JOIN sales s ON s.business_id = si.business_id AND s.id = si.sale_id
+          LEFT JOIN products p ON p.business_id = si.business_id AND p.id = si.product_id
+          WHERE si.business_id = $1 AND s.status = 'completed'
           ORDER BY s.sold_at, si.created_at
         `, [user.id]);
     const customersResult = await client.query(`
           SELECT id, name, phone
           FROM customers
-          WHERE user_id = $1
+          WHERE business_id = $1
           ORDER BY created_at, name
         `, [user.id]);
     const creditsResult = await client.query(`
@@ -68,14 +68,14 @@ export async function loadBootstrapData(user: UserIdentity) {
                  (
                    SELECT si.id
                    FROM sale_items si
-                   WHERE si.user_id = cs.user_id AND si.sale_id = cs.sale_id
+                   WHERE si.business_id = cs.business_id AND si.sale_id = cs.sale_id
                    ORDER BY si.created_at, si.id
                    LIMIT 1
                  ) AS sale_item_id,
                  COALESCE(s.description, 'Venda fiado') AS description
           FROM credit_sales cs
-          JOIN sales s ON s.user_id = cs.user_id AND s.id = cs.sale_id
-          WHERE cs.user_id = $1
+          JOIN sales s ON s.business_id = cs.business_id AND s.id = cs.sale_id
+          WHERE cs.business_id = $1
           ORDER BY cs.created_at
         `, [user.id]);
     const expensesResult = await client.query(`
@@ -85,7 +85,7 @@ export async function loadBootstrapData(user: UserIdentity) {
           LEFT JOIN LATERAL (
             SELECT t.occurred_at, t.payment_method
             FROM transactions t
-            WHERE t.user_id = fe.user_id
+            WHERE t.business_id = fe.business_id
               AND t.fixed_expense_id = fe.id
               AND t.source = 'despesa_fixa'
               AND t.occurred_at >= CASE fe.recurrence
@@ -97,14 +97,14 @@ export async function loadBootstrapData(user: UserIdentity) {
             ORDER BY t.occurred_at DESC
             LIMIT 1
           ) payment ON true
-          WHERE fe.user_id = $1 AND fe.active AND fe.recurrence IN ('weekly', 'monthly')
+          WHERE fe.business_id = $1 AND fe.active AND fe.recurrence IN ('weekly', 'monthly')
           ORDER BY fe.created_at, fe.description
         `, [user.id]);
     const manualResult = await client.query(`
           SELECT id, cash_session_id, occurred_at, type, description, amount, payment_method,
                  movement_kind, entry_kind, expense_kind, identification_pending
           FROM transactions
-          WHERE user_id = $1 AND source IN ('ajuste', 'despesa_avulsa')
+          WHERE business_id = $1 AND source IN ('ajuste', 'despesa_avulsa')
           ORDER BY occurred_at
         `, [user.id]);
     const transactionsResult = await client.query(`
@@ -113,45 +113,45 @@ export async function loadBootstrapData(user: UserIdentity) {
                  cs.customer_id, c.name AS customer_name
           FROM transactions t
           LEFT JOIN credit_sales cs
-            ON cs.user_id = t.user_id AND cs.id = t.credit_sale_id
+            ON cs.business_id = t.business_id AND cs.id = t.credit_sale_id
           LEFT JOIN customers c
-            ON c.user_id = cs.user_id AND c.id = cs.customer_id
-          WHERE t.user_id = $1
+            ON c.business_id = cs.business_id AND c.id = cs.customer_id
+          WHERE t.business_id = $1
           ORDER BY t.occurred_at, t.created_at
         `, [user.id]);
     const cashResult = await client.query(`
           SELECT cs.id, cs.responsible, cs.opened_at, cs.closed_at, cs.status,
                  cs.opening_balance, cs.closing_balance, cs.expected_balance, cs.difference,
                  COALESCE((SELECT SUM(t.amount) FROM transactions t
-                   WHERE t.user_id = cs.user_id AND t.cash_session_id = cs.id
+                   WHERE t.business_id = cs.business_id AND t.cash_session_id = cs.id
                      AND t.type = 'entrada' AND t.payment_method = 'dinheiro'
                      AND t.movement_kind <> 'suprimento'), 0) AS sales_cash,
                  COALESCE((SELECT SUM(t.amount) FROM transactions t
-                   WHERE t.user_id = cs.user_id AND t.cash_session_id = cs.id
+                   WHERE t.business_id = cs.business_id AND t.cash_session_id = cs.id
                      AND t.type = 'entrada' AND t.payment_method = 'pix'
                      AND t.movement_kind <> 'suprimento'), 0) AS sales_pix,
                  COALESCE((SELECT SUM(t.amount) FROM transactions t
-                   WHERE t.user_id = cs.user_id AND t.cash_session_id = cs.id
+                   WHERE t.business_id = cs.business_id AND t.cash_session_id = cs.id
                      AND t.type = 'entrada' AND t.payment_method IN ('cartao_credito', 'cartao_debito')
                      AND t.movement_kind <> 'suprimento'), 0) AS sales_card,
                  COALESCE((SELECT SUM(s.total_amount) FROM sales s
-                   WHERE s.user_id = cs.user_id AND s.cash_session_id = cs.id
+                   WHERE s.business_id = cs.business_id AND s.cash_session_id = cs.id
                      AND s.status = 'completed' AND s.payment_method = 'fiado'), 0) AS sales_credit,
                  COALESCE((SELECT SUM(t.amount) FROM transactions t
-                   WHERE t.user_id = cs.user_id AND t.cash_session_id = cs.id
+                   WHERE t.business_id = cs.business_id AND t.cash_session_id = cs.id
                      AND t.type = 'entrada' AND t.payment_method = 'dinheiro'
                      AND t.movement_kind = 'suprimento'), 0) AS supplies,
                  COALESCE((SELECT SUM(t.amount) FROM transactions t
-                   WHERE t.user_id = cs.user_id AND t.cash_session_id = cs.id
+                   WHERE t.business_id = cs.business_id AND t.cash_session_id = cs.id
                      AND t.type = 'saida' AND t.payment_method = 'dinheiro'), 0) AS withdrawals,
                  COALESCE((SELECT SUM(t.amount) FROM transactions t
-                   WHERE t.user_id = cs.user_id AND t.cash_session_id = cs.id
+                   WHERE t.business_id = cs.business_id AND t.cash_session_id = cs.id
                      AND t.type = 'saida' AND t.payment_method <> 'dinheiro'), 0) AS other_outflows,
                  COALESCE((SELECT COUNT(*) FROM transactions t
-                   WHERE t.user_id = cs.user_id AND t.cash_session_id = cs.id
+                   WHERE t.business_id = cs.business_id AND t.cash_session_id = cs.id
                      AND t.identification_pending), 0)::integer AS pending_count
           FROM cash_sessions cs
-          WHERE cs.user_id = $1
+          WHERE cs.business_id = $1
           ORDER BY cs.opened_at DESC
         `, [user.id]);
 

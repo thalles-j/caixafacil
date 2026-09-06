@@ -12,18 +12,18 @@ accountRouter.use(authenticateAccessToken);
 accountRouter.use(requireClient);
 const sensitiveAccountLimit = rateLimit('account-sensitive', 10, 15 * 60 * 1000);
 const BACKUP_FORMAT = 'caixafacil-postgres-backup';
-const BACKUP_VERSION = 3;
+const BACKUP_VERSION = 4;
 const RESTORE_COLUMNS: Record<string, string[]> = {
-  business_settings: ['user_id', 'business_name', 'business_category', 'offering', 'controls_stock', 'daily_sales_goal', 'report_frequency', 'report_by_email', 'report_email', 'view_period', 'onboarding_completed', 'idle_timeout_minutes', 'receipt_settings', 'created_at', 'updated_at'],
-  categories: ['id', 'user_id', 'name', 'created_at', 'updated_at'],
-  products: ['id', 'user_id', 'category_id', 'kind', 'name', 'barcode', 'sale_price', 'cost_price', 'stock_quantity', 'minimum_quantity', 'service_duration', 'active', 'created_at', 'updated_at'],
-  customers: ['id', 'user_id', 'name', 'phone', 'email', 'notes', 'whatsapp_consent_at', 'whatsapp_consent_version', 'whatsapp_consent_recorded_by', 'anonymized_at', 'created_at', 'updated_at'],
-  cash_sessions: ['id', 'user_id', 'responsible', 'opened_at', 'closed_at', 'opening_balance', 'closing_balance', 'expected_balance', 'status', 'notes', 'created_at', 'updated_at'],
-  sales: ['id', 'user_id', 'cash_session_id', 'customer_id', 'description', 'payment_method', 'status', 'total_amount', 'sold_at', 'cancelled_at', 'actor_id', 'actor_name', 'client_sale_id', 'request_hash', 'returned_amount', 'created_at', 'updated_at'],
-  sale_items: ['id', 'user_id', 'sale_id', 'product_id', 'product_name', 'quantity', 'unit_price', 'unit_cost', 'returned_quantity', 'created_at'],
-  fixed_expenses: ['id', 'user_id', 'description', 'amount', 'recurrence', 'starts_on', 'ends_on', 'next_due_date', 'due_day', 'active', 'created_at', 'updated_at'],
-  credit_sales: ['id', 'user_id', 'sale_id', 'customer_id', 'amount', 'paid_amount', 'returned_amount', 'status', 'due_date', 'paid_at', 'created_at', 'updated_at'],
-  transactions: ['id', 'user_id', 'cash_session_id', 'sale_id', 'fixed_expense_id', 'credit_sale_id', 'type', 'source', 'payment_method', 'amount', 'description', 'movement_kind', 'entry_kind', 'expense_kind', 'identification_pending', 'occurred_at', 'created_at'],
+  business_settings: ['user_id', 'business_id', 'business_name', 'business_category', 'offering', 'controls_stock', 'daily_sales_goal', 'report_frequency', 'report_by_email', 'report_email', 'view_period', 'onboarding_completed', 'idle_timeout_minutes', 'receipt_settings', 'created_at', 'updated_at'],
+  categories: ['id', 'user_id', 'business_id', 'name', 'created_at', 'updated_at'],
+  products: ['id', 'user_id', 'business_id', 'category_id', 'kind', 'name', 'barcode', 'sale_price', 'cost_price', 'stock_quantity', 'minimum_quantity', 'service_duration', 'active', 'created_at', 'updated_at'],
+  customers: ['id', 'user_id', 'business_id', 'name', 'phone', 'email', 'notes', 'whatsapp_consent_at', 'whatsapp_consent_version', 'whatsapp_consent_recorded_by', 'anonymized_at', 'created_at', 'updated_at'],
+  cash_sessions: ['id', 'user_id', 'business_id', 'responsible', 'opened_at', 'closed_at', 'opening_balance', 'closing_balance', 'expected_balance', 'status', 'notes', 'created_at', 'updated_at'],
+  sales: ['id', 'user_id', 'business_id', 'cash_session_id', 'customer_id', 'description', 'payment_method', 'status', 'total_amount', 'sold_at', 'cancelled_at', 'actor_id', 'actor_name', 'client_sale_id', 'request_hash', 'returned_amount', 'created_at', 'updated_at'],
+  sale_items: ['id', 'user_id', 'business_id', 'sale_id', 'product_id', 'product_name', 'quantity', 'unit_price', 'unit_cost', 'returned_quantity', 'created_at'],
+  fixed_expenses: ['id', 'user_id', 'business_id', 'description', 'amount', 'recurrence', 'starts_on', 'ends_on', 'next_due_date', 'due_day', 'active', 'created_at', 'updated_at'],
+  credit_sales: ['id', 'user_id', 'business_id', 'sale_id', 'customer_id', 'amount', 'paid_amount', 'returned_amount', 'status', 'due_date', 'paid_at', 'created_at', 'updated_at'],
+  transactions: ['id', 'user_id', 'business_id', 'cash_session_id', 'sale_id', 'fixed_expense_id', 'credit_sale_id', 'type', 'source', 'payment_method', 'amount', 'description', 'movement_kind', 'entry_kind', 'expense_kind', 'identification_pending', 'occurred_at', 'created_at'],
 };
 const BACKUP_TABLES = Object.keys(RESTORE_COLUMNS);
 const DELETE_ORDER = [
@@ -39,26 +39,27 @@ function asyncRoute(handler: AsyncRoute) {
   };
 }
 
-function authenticatedUserId(req: Request): string | null {
+function authenticatedIdentity(req: Request): { actorId:string; businessId:string } | null {
   const header = req.headers.authorization;
   const token = header?.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return null;
   try {
-    return verifyToken(token).tenantId ?? null;
+    const payload=verifyToken(token);
+    return payload.tenantId ? {actorId:payload.sub,businessId:payload.tenantId} : null;
   } catch {
     return null;
   }
 }
 
 accountRouter.delete('/data', sensitiveAccountLimit, requireTenantRole('OWNER'), asyncRoute(async (req, res) => {
-  const userId = authenticatedUserId(req);
-  if (!userId) return res.status(401).json({ error: 'Token inválido ou expirado.' });
+  const identity = authenticatedIdentity(req);
+  if (!identity) return res.status(401).json({ error: 'Token inválido ou expirado.' });
 
-  await withTenantTransaction(userId, async (client) => {
+  await withTenantTransaction(identity.businessId, async (client) => {
     // Ordem determinada pelas FKs. A conta em users nao e removida, portanto
     // e-mail, hash da senha e capacidade de login permanecem intactos.
     for (const table of DELETE_ORDER) {
-      await client.query(`DELETE FROM ${table} WHERE user_id = $1`, [userId]);
+      await client.query(`DELETE FROM ${table} WHERE business_id = $1`, [identity.businessId]);
     }
   });
 
@@ -66,13 +67,13 @@ accountRouter.delete('/data', sensitiveAccountLimit, requireTenantRole('OWNER'),
 }));
 
 accountRouter.get('/backup', sensitiveAccountLimit, requireTenantRole('OWNER'), asyncRoute(async (req, res) => {
-  const userId = authenticatedUserId(req);
-  if (!userId) return res.status(401).json({ error: 'Token inválido ou expirado.' });
+  const identity = authenticatedIdentity(req);
+  if (!identity) return res.status(401).json({ error: 'Token inválido ou expirado.' });
 
-  const tables = await withTenantTransaction(userId, async (client) => {
+  const tables = await withTenantTransaction(identity.businessId, async (client) => {
     const result: Record<string, unknown[]> = {};
     for (const table of BACKUP_TABLES) {
-      const rows = await client.query(`SELECT * FROM ${table} WHERE user_id = $1`, [userId]);
+      const rows = await client.query(`SELECT * FROM ${table} WHERE business_id = $1`, [identity.businessId]);
       result[table] = rows.rows;
     }
     return result;
@@ -81,46 +82,52 @@ accountRouter.get('/backup', sensitiveAccountLimit, requireTenantRole('OWNER'), 
   return res.json({
     format: BACKUP_FORMAT,
     version: BACKUP_VERSION,
+    scope: 'active-business',
+    businessId: identity.businessId,
+    ownerUserId: identity.actorId,
     exportedAt: new Date().toISOString(),
     tables,
   });
 }));
 
 accountRouter.put('/backup', sensitiveAccountLimit, requireTenantRole('OWNER'), asyncRoute(async (req, res) => {
-  const userId = authenticatedUserId(req);
-  if (!userId) return res.status(401).json({ error: 'Token inválido ou expirado.' });
+  const identity = authenticatedIdentity(req);
+  if (!identity) return res.status(401).json({ error: 'Token inválido ou expirado.' });
   const backup = req.body;
-  if (!backup || backup.format !== BACKUP_FORMAT || backup.version !== BACKUP_VERSION || !backup.tables) {
-    return res.status(400).json({ error: 'Arquivo inválido ou versão de backup não suportada.' });
+  if (!backup || backup.format !== BACKUP_FORMAT || backup.version !== BACKUP_VERSION ||
+      backup.scope !== 'active-business' || backup.ownerUserId !== identity.actorId || !backup.tables) {
+    return res.status(400).json({ error: 'Arquivo invÃ¡lido ou versÃ£o de backup nÃ£o suportada.' });
   }
 
   for (const table of BACKUP_TABLES) {
     if (!Array.isArray(backup.tables[table])) {
-      return res.status(400).json({ error: `O backup não contém a tabela ${table}.` });
+      return res.status(400).json({ error: `O backup nÃ£o contÃ©m a tabela ${table}.` });
     }
     if (backup.tables[table].some((row: unknown) =>
-      !row || typeof row !== 'object' || (row as Record<string, unknown>).user_id !== userId)) {
-      return res.status(400).json({ error: 'O backup pertence a outra conta ou foi alterado.' });
+      !row || typeof row !== 'object' || (row as Record<string, unknown>).business_id !== backup.businessId)) {
+      return res.status(400).json({ error: 'O backup pertence a outro negócio ou foi alterado.' });
     }
   }
 
-  await withTenantTransaction(userId, async (client) => {
+  await withTenantTransaction(identity.businessId, async (client) => {
     const protectedCustomers = await client.query(
-      'SELECT customer_id AS id FROM privacy_erasure_tombstones WHERE user_id = $1', [userId],
+      'SELECT customer_id AS id FROM privacy_erasure_tombstones WHERE business_id = $1', [identity.businessId],
     );
     const permanentlyAnonymized = new Set(protectedCustomers.rows.map((row) => String(row.id)));
     for (const table of DELETE_ORDER) {
-      await client.query(`DELETE FROM ${table} WHERE user_id = $1`, [userId]);
+      await client.query(`DELETE FROM ${table} WHERE business_id = $1`, [identity.businessId]);
     }
 
     for (const table of BACKUP_TABLES) {
       let rows = backup.tables[table] as Record<string, unknown>[];
       if (!rows.length) continue;
-      // A quitação do fiado é derivada das transactions por trigger. Restaurar
-      // a cobrança como pendente e inserir o livro financeiro depois recompõe
-      // os campos pagos sem permitir uma dívida quitada sem receita associada.
+      // A quitaÃ§Ã£o do fiado Ã© derivada das transactions por trigger. Restaurar
+      // a cobranÃ§a como pendente e inserir o livro financeiro depois recompÃµe
+      // os campos pagos sem permitir uma dÃ­vida quitada sem receita associada.
       if (table === 'credit_sales') {
-        rows = rows.map((row) => ({ ...row, paid_amount: 0, status: 'pendente', paid_at: null }));
+        rows = rows.map((row) => ({ ...row, user_id:identity.actorId, business_id:identity.businessId, paid_amount: 0, status: 'pendente', paid_at: null }));
+      } else {
+        rows = rows.map((row) => ({ ...row, user_id:identity.actorId, business_id:identity.businessId }));
       }
       if (table === 'customers') {
         rows = rows.map((row) => permanentlyAnonymized.has(String(row.id))
@@ -144,8 +151,8 @@ accountRouter.put('/backup', sensitiveAccountLimit, requireTenantRole('OWNER'), 
 }));
 
 accountRouter.patch('/password', sensitiveAccountLimit, asyncRoute(async (req, res) => {
-  const userId = authenticatedUserId(req);
-  if (!userId) return res.status(401).json({ error: 'Token inválido ou expirado.' });
+  const identity = authenticatedIdentity(req);
+  if (!identity) return res.status(401).json({ error: 'Token inválido ou expirado.' });
 
   const { currentPassword, newPassword, confirmPassword } = req.body ?? {};
   if (typeof currentPassword !== 'string' || !currentPassword) {
@@ -154,13 +161,13 @@ accountRouter.patch('/password', sensitiveAccountLimit, asyncRoute(async (req, r
   const passwordError = passwordValidationError(newPassword);
   if (passwordError) return res.status(400).json({ error: passwordError });
   if (newPassword !== confirmPassword) {
-    return res.status(400).json({ error: 'A confirmação da nova senha não confere.' });
+    return res.status(400).json({ error: 'A confirmaÃ§Ã£o da nova senha nÃ£o confere.' });
   }
 
-  const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [userId]);
+  const result = await pool.query('SELECT password_hash FROM users WHERE id = $1', [identity.actorId]);
   const account = result.rows[0];
   if (!account || !(await comparePassword(currentPassword, account.password_hash))) {
-    return res.status(400).json({ error: 'A senha atual está incorreta.' });
+    return res.status(401).json({ error: 'A senha atual estÃ¡ incorreta.' });
   }
   if (await comparePassword(newPassword, account.password_hash)) {
     return res.status(400).json({ error: 'A nova senha precisa ser diferente da senha atual.' });
@@ -170,8 +177,8 @@ accountRouter.patch('/password', sensitiveAccountLimit, asyncRoute(async (req, r
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2', [passwordHash, userId]);
-    await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [userId]);
+    await client.query('UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2', [passwordHash, identity.actorId]);
+    await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [identity.actorId]);
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');

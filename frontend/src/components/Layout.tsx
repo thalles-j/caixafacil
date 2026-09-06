@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { Bell, GearSix, Moon, Sun } from '@phosphor-icons/react';
 import { useAppData } from '../context/AppDataContext';
+import { useAuth } from '../context/AuthContext';
 import { getCategoryTheme } from '../lib/categoryThemes';
 import { formatCurrency, todayISO } from '../lib/format';
 import { useDarkMode } from '../lib/theme';
@@ -36,6 +37,7 @@ export default function Layout() {
   const hojeISO = todayISO();
   const theme = getCategoryTheme(data.config?.categoria);
   const Icon = theme.icon;
+  const { user } = useAuth();
 
   useEffect(() => {
     if (!notificacoesAbertas) return;
@@ -75,12 +77,25 @@ export default function Layout() {
         <header className="sticky top-0 z-40 border-b border-line bg-paper-raised/95 px-4 py-3 backdrop-blur-sm">
           <div className="mx-auto flex max-w-md items-center justify-between sm:max-w-xl lg:max-w-5xl">
             <div className="flex min-w-0 items-center gap-3">
-              <div
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-paper"
-                style={{ backgroundColor: theme.accent }}
-              >
-                <Icon size={18} weight="fill" />
-              </div>
+              {user?.tenantRole === 'OWNER' ? (
+                <button
+                  type="button"
+                  onClick={() => navigate('/negocios')}
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-paper shadow-sm transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ledger focus-visible:ring-offset-2 focus-visible:ring-offset-paper-raised"
+                  style={{ backgroundColor: theme.accent }}
+                  aria-label="Abrir Meus negócios"
+                  title="Meus negócios"
+                >
+                  <Icon size={18} weight="fill" />
+                </button>
+              ) : (
+                <div
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-paper"
+                  style={{ backgroundColor: theme.accent }}
+                >
+                  <Icon size={18} weight="fill" />
+                </div>
+              )}
               <div className="min-w-0">
                 <h1 className="min-w-0 truncate font-display text-lg font-semibold leading-tight text-ink sm:text-xl">
                   {data.config?.nome ?? 'Meu Negócio'}

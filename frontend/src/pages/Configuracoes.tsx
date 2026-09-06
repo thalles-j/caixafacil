@@ -162,7 +162,7 @@ export default function Configuracoes() {
         const parsed = JSON.parse(String(leitor.result));
         if (
           !parsed || parsed.format !== 'caixafacil-postgres-backup' ||
-          parsed.version !== 3 || typeof parsed.tables !== 'object'
+          parsed.version !== 4 || parsed.scope !== 'active-business' || typeof parsed.tables !== 'object'
         ) {
           setImportErro('Arquivo inválido ou versão de backup não suportada.');
           return;
@@ -610,7 +610,7 @@ export default function Configuracoes() {
         <section className="rounded-2xl border border-line bg-paper-raised p-4 shadow-sm">
           <h3 className="mb-1 text-sm font-bold uppercase tracking-wide text-ink-soft">Backup</h3>
           <p className="mb-3 text-xs text-ink-soft">
-            Seus dados operacionais ficam no PostgreSQL/Neon. Este arquivo exporta catálogo, clientes, caixas, vendas,
+            Seus dados operacionais ficam no PostgreSQL/Neon. Este arquivo exporta somente o negócio ativo: catálogo, clientes, caixas, vendas,
             fiado, movimentações e configurações da sua conta.
           </p>
           <div className="flex flex-col gap-2 sm:flex-row">

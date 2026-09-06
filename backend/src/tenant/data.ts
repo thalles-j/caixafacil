@@ -5,19 +5,19 @@ import { withTenantTransaction } from '../db.js';
 export async function loadOperatorData(tenantId: string) {
   return withTenantTransaction(tenantId, async client => {
     const settings = (await client.query(`SELECT business_name,business_category,offering,controls_stock,onboarding_completed,
-      receipt_settings,idle_timeout_minutes,view_period FROM business_settings WHERE user_id=$1`, [tenantId])).rows[0];
+      receipt_settings,idle_timeout_minutes,view_period FROM business_settings WHERE business_id=$1`, [tenantId])).rows[0];
     const products = (await client.query(`SELECT id,kind,name,barcode,sale_price,stock_quantity,minimum_quantity,
-      service_duration::text FROM products WHERE user_id=$1 AND active ORDER BY name`, [tenantId])).rows;
-    const customers = (await client.query('SELECT id,name FROM customers WHERE user_id=$1 ORDER BY name', [tenantId])).rows;
-    const categories = (await client.query('SELECT id,name FROM categories WHERE user_id=$1 ORDER BY name', [tenantId])).rows;
+      service_duration::text FROM products WHERE business_id=$1 AND active ORDER BY name`, [tenantId])).rows;
+    const customers = (await client.query('SELECT id,name FROM customers WHERE business_id=$1 ORDER BY name', [tenantId])).rows;
+    const categories = (await client.query('SELECT id,name FROM categories WHERE business_id=$1 ORDER BY name', [tenantId])).rows;
     const sessions = (await client.query(`SELECT id,responsible,opened_at,opening_balance,status FROM cash_sessions
-      WHERE user_id=$1 AND status='open'`, [tenantId])).rows;
+      WHERE business_id=$1 AND status='open'`, [tenantId])).rows;
     const sales = (await client.query(`SELECT si.id,si.id AS item_id,s.id AS sale_id,si.product_id,si.product_name,
       si.quantity,si.returned_quantity,si.unit_price,s.cash_session_id,s.sold_at,s.payment_method,p.kind AS product_kind
-      FROM sale_items si JOIN sales s ON s.user_id=si.user_id AND s.id=si.sale_id
-      LEFT JOIN products p ON p.user_id=si.user_id AND p.id=si.product_id
-      WHERE si.user_id=$1 AND s.status='completed' AND s.cash_session_id IN
-        (SELECT id FROM cash_sessions WHERE user_id=$1 AND status='open')
+      FROM sale_items si JOIN sales s ON s.business_id=si.business_id AND s.id=si.sale_id
+      LEFT JOIN products p ON p.business_id=si.business_id AND p.id=si.product_id
+      WHERE si.business_id=$1 AND s.status='completed' AND s.cash_session_id IN
+        (SELECT id FROM cash_sessions WHERE business_id=$1 AND status='open')
       ORDER BY s.sold_at DESC,si.created_at`, [tenantId])).rows;
     const current = sessions[0];
     return {

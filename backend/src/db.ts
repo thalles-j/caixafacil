@@ -8,6 +8,7 @@ const schemaUrls = [
   new URL('../prisma/migrations/0003_admin_account_management/migration.sql', import.meta.url),
   new URL('../prisma/migrations/0004_tenant_operations/migration.sql', import.meta.url),
   new URL('../prisma/migrations/0005_privacy/migration.sql', import.meta.url),
+  new URL('../prisma/migrations/0006_multi_business/migration.sql', import.meta.url),
 ];
 const configuredDatabaseUrl = process.env.DATABASE_URL;
 
@@ -77,19 +78,22 @@ export async function ensureSchema() {
  * `SET LOCAL` (via set_config(..., true)) impede vazamento entre conexoes do pool.
  */
 export async function withTenantTransaction<T>(
-  userId: string,
+  businessId: string,
   operation: (client: import('pg').PoolClient) => Promise<T>,
 ): Promise<T> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const business = await client.query('SELECT owner_user_id FROM businesses WHERE id=$1 AND archived_at IS NULL', [businessId]);
+    if (!business.rowCount) throw Object.assign(new Error('Negócio não encontrado.'), { status: 404 });
     // neondb_owner possui BYPASSRLS. A role NOLOGIN criada pelo schema tem
     // apenas privilegios de negocio e obrigatoriamente obedece ao RLS.
     await client.query('SET LOCAL ROLE mnb_app_runtime');
-    await client.query("SELECT set_config('app.current_user_id', $1, true)", [userId]);
+    await client.query("SELECT set_config('app.current_user_id', $1, true)", [business.rows[0].owner_user_id]);
+    await client.query("SELECT set_config('app.current_business_id', $1, true)", [businessId]);
     const result = await operation(client);
     const actor = requestActor.getStore();
-    if (actor && actor.tenantId === userId && !['GET', 'HEAD'].includes(actor.method)) {
+    if (actor && actor.tenantId === businessId && !['GET', 'HEAD'].includes(actor.method)) {
       await auditTenant(client, actor, `business.${actor.method.toLowerCase()}`, actor.actorId, { path: actor.path });
     }
     await client.query('COMMIT');

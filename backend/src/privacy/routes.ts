@@ -37,7 +37,7 @@ export async function recordConsentHandler(req: Request, res: Response) {
     throw fail('Confirme explicitamente a versão atual do consentimento.', 400);
   }
   const consent = await withTenantTransaction(identity.tenantId, async (client) => {
-    const found = await client.query('SELECT id, phone, anonymized_at FROM customers WHERE user_id = $1 AND id = $2 FOR UPDATE', [identity.tenantId, id]);
+    const found = await client.query('SELECT id, phone, anonymized_at FROM customers WHERE business_id = $1 AND id = $2 FOR UPDATE', [identity.tenantId, id]);
     const customer = found.rows[0];
     if (!customer) throw fail('Cliente não encontrado.', 404);
     if (granted && (customer.anonymized_at || !normalizeChargePhone(customer.phone))) throw fail('O cliente precisa ter um telefone válido e cadastro ativo.', 409);
@@ -45,7 +45,7 @@ export async function recordConsentHandler(req: Request, res: Response) {
       `UPDATE customers SET whatsapp_consent_at = CASE WHEN $3 THEN now() ELSE NULL END,
          whatsapp_consent_version = CASE WHEN $3 THEN $4 ELSE NULL END,
          whatsapp_consent_recorded_by = CASE WHEN $3 THEN $5::uuid ELSE NULL END
-       WHERE user_id = $1 AND id = $2
+       WHERE business_id = $1 AND id = $2
        RETURNING whatsapp_consent_at, whatsapp_consent_version, whatsapp_consent_recorded_by`,
       [identity.tenantId, id, granted, WHATSAPP_CONSENT_VERSION, identity.actorId],
     );
@@ -62,7 +62,7 @@ export async function whatsappChargeHandler(req: Request, res: Response) {
     // Serializa com revogação e anonimização: nenhuma URL é emitida usando estado anterior.
     const found = await client.query(
       `SELECT id, name, phone, anonymized_at, whatsapp_consent_at, whatsapp_consent_version, whatsapp_consent_recorded_by
-       FROM customers WHERE user_id = $1 AND id = $2 FOR UPDATE`, [identity.tenantId, id],
+       FROM customers WHERE business_id = $1 AND id = $2 FOR UPDATE`, [identity.tenantId, id],
     );
     const customer = found.rows[0];
     if (!customer) throw fail('Cliente não encontrado.', 404);
@@ -73,7 +73,7 @@ export async function whatsappChargeHandler(req: Request, res: Response) {
     if (!phone) throw fail('Telefone do cliente inválido.', 409);
     const balance = await client.query(
       `SELECT COALESCE(SUM(amount - paid_amount), 0) AS outstanding
-       FROM credit_sales WHERE user_id = $1 AND customer_id = $2 AND status IN ('pendente', 'parcial')`,
+       FROM credit_sales WHERE business_id = $1 AND customer_id = $2 AND status IN ('pendente', 'parcial')`,
       [identity.tenantId, id],
     );
     const amount = Number(balance.rows[0]?.outstanding);
@@ -93,27 +93,27 @@ export async function anonymizeCustomerHandler(req: Request, res: Response) {
   const id = customerId(req);
   if (req.body?.confirmationId !== id) throw fail('Digite o identificador do cliente para confirmar.', 400);
   await withTenantTransaction(identity.tenantId, async (client) => {
-    const found = await client.query('SELECT id FROM customers WHERE user_id = $1 AND id = $2 FOR UPDATE', [identity.tenantId, id]);
+    const found = await client.query('SELECT id FROM customers WHERE business_id = $1 AND id = $2 FOR UPDATE', [identity.tenantId, id]);
     if (!found.rowCount) throw fail('Cliente não encontrado.', 404);
     await client.query(
       `UPDATE customers SET name = $3, phone = NULL, email = NULL, notes = NULL,
          whatsapp_consent_at = NULL, whatsapp_consent_version = NULL, whatsapp_consent_recorded_by = NULL,
          anonymized_at = COALESCE(anonymized_at, now())
-       WHERE user_id = $1 AND id = $2`, [identity.tenantId, id, ANONYMIZED_CUSTOMER_NAME],
+       WHERE business_id = $1 AND id = $2`, [identity.tenantId, id, ANONYMIZED_CUSTOMER_NAME],
     );
-    await client.query(`INSERT INTO privacy_erasure_tombstones(user_id,customer_id)
-      VALUES($1,$2) ON CONFLICT(user_id,customer_id) DO NOTHING`, [identity.tenantId, id]);
+    await client.query(`INSERT INTO privacy_erasure_tombstones(business_id,customer_id)
+      VALUES($1,$2) ON CONFLICT(business_id,customer_id) DO NOTHING`, [identity.tenantId, id]);
     // Descrições históricas podem conter nomes/telefones digitados ou interpolados.
     // Substituí-las integralmente evita manter partes identificáveis em texto livre.
     await client.query(
       `UPDATE sales SET description = 'Venda — cliente anonimizado'
-       WHERE user_id = $1 AND customer_id = $2`, [identity.tenantId, id],
+       WHERE business_id = $1 AND customer_id = $2`, [identity.tenantId, id],
     );
     await client.query(
       `UPDATE transactions SET description = 'Movimentação — cliente anonimizado'
-       WHERE user_id = $1 AND (
-         sale_id IN (SELECT id FROM sales WHERE user_id = $1 AND customer_id = $2)
-         OR credit_sale_id IN (SELECT id FROM credit_sales WHERE user_id = $1 AND customer_id = $2)
+       WHERE business_id = $1 AND (
+         sale_id IN (SELECT id FROM sales WHERE business_id = $1 AND customer_id = $2)
+         OR credit_sale_id IN (SELECT id FROM credit_sales WHERE business_id = $1 AND customer_id = $2)
        )`, [identity.tenantId, id],
     );
     await auditTenant(client, identity, 'customer.anonymized', id, { financialRecordsPreserved: true });

@@ -202,7 +202,7 @@ export const listClientsHandler: AsyncRoute = async (req, res) => {
     pool.query(
       `SELECT u.id, u.email, u.name, u.status, u.created_at, bs.business_name
        FROM users u
-       LEFT JOIN business_settings bs ON bs.user_id = u.id
+       LEFT JOIN LATERAL (SELECT settings.* FROM business_settings settings JOIN businesses b ON b.id=settings.business_id WHERE b.owner_user_id=u.id AND b.archived_at IS NULL ORDER BY b.created_at,b.id LIMIT 1) bs ON true
        WHERE ${where}
        ORDER BY u.created_at DESC, u.id DESC
        LIMIT $3 OFFSET $4`,
@@ -211,7 +211,7 @@ export const listClientsHandler: AsyncRoute = async (req, res) => {
     pool.query(
       `SELECT COUNT(*)::integer AS total
        FROM users u
-       LEFT JOIN business_settings bs ON bs.user_id = u.id
+       LEFT JOIN LATERAL (SELECT settings.* FROM business_settings settings JOIN businesses b ON b.id=settings.business_id WHERE b.owner_user_id=u.id AND b.archived_at IS NULL ORDER BY b.created_at,b.id LIMIT 1) bs ON true
        WHERE ${where}`,
       [search, status],
     ),
@@ -235,13 +235,13 @@ export const clientDetailHandler: AsyncRoute = async (req, res) => {
   const result = await pool.query(
     `SELECT u.id, u.email, u.name, u.status, u.created_at, u.updated_at,
             bs.business_name, bs.business_category, bs.offering, bs.onboarding_completed,
-            (SELECT COUNT(*)::integer FROM products p WHERE p.user_id = u.id AND p.active) AS products,
-            (SELECT COUNT(*)::integer FROM sales s WHERE s.user_id = u.id AND s.status = 'completed') AS sales,
-            (SELECT COUNT(*)::integer FROM cash_sessions cs WHERE cs.user_id = u.id AND cs.status = 'closed') AS cash_closings,
-            (SELECT COUNT(*)::integer FROM customers c WHERE c.user_id = u.id) AS customers,
-            (SELECT COUNT(*)::integer FROM credit_sales cr WHERE cr.user_id = u.id AND cr.status <> 'pago') AS open_credits
+            (SELECT COUNT(*)::integer FROM products p WHERE p.business_id IN (SELECT id FROM businesses WHERE owner_user_id=u.id) AND p.active) AS products,
+            (SELECT COUNT(*)::integer FROM sales s WHERE s.business_id IN (SELECT id FROM businesses WHERE owner_user_id=u.id) AND s.status = 'completed') AS sales,
+            (SELECT COUNT(*)::integer FROM cash_sessions cs WHERE cs.business_id IN (SELECT id FROM businesses WHERE owner_user_id=u.id) AND cs.status = 'closed') AS cash_closings,
+            (SELECT COUNT(*)::integer FROM customers c WHERE c.business_id IN (SELECT id FROM businesses WHERE owner_user_id=u.id)) AS customers,
+            (SELECT COUNT(*)::integer FROM credit_sales cr WHERE cr.business_id IN (SELECT id FROM businesses WHERE owner_user_id=u.id) AND cr.status <> 'pago') AS open_credits
      FROM users u
-     LEFT JOIN business_settings bs ON bs.user_id = u.id
+     LEFT JOIN LATERAL (SELECT settings.* FROM business_settings settings JOIN businesses b ON b.id=settings.business_id WHERE b.owner_user_id=u.id AND b.archived_at IS NULL ORDER BY b.created_at,b.id LIMIT 1) bs ON true
      WHERE u.id = $1 AND u.role = 'client' AND u.account_kind = 'owner'`,
     [req.params.id],
   );
@@ -278,7 +278,7 @@ export const updateClientStatusHandler: AsyncRoute = async (req, res) => {
     await client.query('BEGIN');
     const currentResult = await client.query(
       `SELECT u.id, u.email, u.name, u.status, bs.business_name
-       FROM users u LEFT JOIN business_settings bs ON bs.user_id = u.id
+       FROM users u LEFT JOIN LATERAL (SELECT settings.* FROM business_settings settings JOIN businesses b ON b.id=settings.business_id WHERE b.owner_user_id=u.id AND b.archived_at IS NULL ORDER BY b.created_at,b.id LIMIT 1) bs ON true
        WHERE u.id = $1 AND u.role = 'client' AND u.account_kind = 'owner' FOR UPDATE OF u`,
       [req.params.id],
     );
@@ -319,7 +319,7 @@ export const updateClientNameHandler: AsyncRoute = async (req, res) => {
     await client.query('BEGIN');
     const currentResult = await client.query(
       `SELECT u.id, u.email, u.name, bs.business_name
-       FROM users u LEFT JOIN business_settings bs ON bs.user_id = u.id
+       FROM users u LEFT JOIN LATERAL (SELECT settings.* FROM business_settings settings JOIN businesses b ON b.id=settings.business_id WHERE b.owner_user_id=u.id AND b.archived_at IS NULL ORDER BY b.created_at,b.id LIMIT 1) bs ON true
        WHERE u.id = $1 AND u.role = 'client' AND u.account_kind = 'owner' FOR UPDATE OF u`,
       [req.params.id],
     );
@@ -335,8 +335,12 @@ export const updateClientNameHandler: AsyncRoute = async (req, res) => {
     }
     await client.query(`UPDATE users SET name = $2, updated_at = now() WHERE id = $1`, [req.params.id, name]);
     await client.query(
-      `UPDATE business_settings SET business_name = $2, updated_at = now() WHERE user_id = $1`,
+      `UPDATE business_settings SET business_name=$2,updated_at=now() WHERE business_id=(SELECT id FROM businesses WHERE owner_user_id=$1 AND archived_at IS NULL ORDER BY created_at,id LIMIT 1)`,
       [req.params.id, name],
+    );
+    await client.query(
+      `UPDATE businesses SET name=$2,updated_at=now() WHERE id=(SELECT id FROM businesses WHERE owner_user_id=$1 AND archived_at IS NULL ORDER BY created_at,id LIMIT 1)`,
+      [req.params.id,name],
     );
     await client.query(
       `INSERT INTO admin_audit_logs (admin_user_id, target_user_id, action, details)
@@ -368,7 +372,7 @@ export const resetClientPasswordHandler: AsyncRoute = async (req, res) => {
     await client.query('BEGIN');
     const currentResult = await client.query(
       `SELECT u.id, u.email, u.name, bs.business_name
-       FROM users u LEFT JOIN business_settings bs ON bs.user_id = u.id
+       FROM users u LEFT JOIN LATERAL (SELECT settings.* FROM business_settings settings JOIN businesses b ON b.id=settings.business_id WHERE b.owner_user_id=u.id AND b.archived_at IS NULL ORDER BY b.created_at,b.id LIMIT 1) bs ON true
        WHERE u.id = $1 AND u.role = 'client' AND u.account_kind = 'owner' FOR UPDATE OF u`,
       [req.params.id],
     );
@@ -413,7 +417,7 @@ export const deleteClientHandler: AsyncRoute = async (req, res) => {
     await client.query('BEGIN');
     const currentResult = await client.query(
       `SELECT u.id, u.email, u.name, u.status, bs.business_name
-       FROM users u LEFT JOIN business_settings bs ON bs.user_id = u.id
+       FROM users u LEFT JOIN LATERAL (SELECT settings.* FROM business_settings settings JOIN businesses b ON b.id=settings.business_id WHERE b.owner_user_id=u.id AND b.archived_at IS NULL ORDER BY b.created_at,b.id LIMIT 1) bs ON true
        WHERE u.id = $1 AND u.role = 'client' AND u.account_kind = 'owner' FOR UPDATE OF u`,
       [req.params.id],
     );

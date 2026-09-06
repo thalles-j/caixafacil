@@ -99,8 +99,17 @@ authRouter.post('/register', registerLimit, asyncRoute(async (req, res) => {
   const id = crypto.randomUUID();
   const passwordHash = await hashPassword(password);
   try {
-    await pool.query(`WITH created AS (INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3) RETURNING id)
-      INSERT INTO tenant_memberships(actor_id,user_id,role) SELECT id,id,'OWNER' FROM created`, [
+    await pool.query(`WITH created AS (
+        INSERT INTO users (id,email,password_hash) VALUES ($1,$2,$3) RETURNING id,email,created_at
+      ), created_business AS (
+        INSERT INTO businesses(id,owner_user_id,name,category,offering,created_at,updated_at)
+        SELECT id,id,'Meu Negócio','Outros','ambos',created_at,created_at FROM created RETURNING id,owner_user_id
+      ), membership AS (
+        INSERT INTO business_memberships(user_id,business_id,role)
+        SELECT owner_user_id,id,'OWNER' FROM created_business
+      )
+      INSERT INTO tenant_memberships(actor_id,user_id,role)
+      SELECT owner_user_id,id,'OWNER' FROM created_business ON CONFLICT(actor_id) DO NOTHING`, [
       id,
       normalizedEmail,
       passwordHash,
@@ -274,6 +283,24 @@ authRouter.get('/me', authReadLimit, asyncRoute(async (req,res) => {
   try { payload=verifyToken(token); } catch { return res.status(401).json({error:'Token inválido ou expirado.'}); }
   const {user}=await validateSession(payload);
   return res.json({user:publicUser(user),data:await authData(user)});
+}));
+
+authRouter.post('/business/switch', authReadLimit, asyncRoute(async (req,res) => {
+  const token=req.headers.authorization?.replace(/^Bearer /,'');
+  const businessId=String(req.body?.businessId ?? '');
+  if (!token || !/^[0-9a-f-]{36}$/i.test(businessId)) return res.status(400).json({error:'Negócio inválido.'});
+  let payload;
+  try { payload=verifyToken(token); } catch { return res.status(401).json({error:'Token inválido ou expirado.'}); }
+  await validateSession(payload);
+  const selected=await sessionUser(payload.sub,businessId);
+  if (!activeUser(selected) || selected.role==='admin' || !selected.tenant_id) {
+    return res.status(403).json({error:'Você não possui acesso a este negócio.'});
+  }
+  await pool.query('UPDATE auth_sessions SET user_id=$3,business_id=$4,last_activity_at=now() WHERE id=$1 AND actor_id=$2',
+    [payload.sid,payload.sub,selected.owner_user_id,businessId]);
+  const nextPayload=tokenPayload(selected,payload.sid!);
+  setRefreshCookie(res,nextPayload);
+  return res.json({token:signToken(nextPayload),user:publicUser(selected),data:await authData(selected)});
 }));
 
 authRouter.post('/session/activity', authReadLimit, asyncRoute(async (req,res) => {

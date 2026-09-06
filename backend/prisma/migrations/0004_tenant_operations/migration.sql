@@ -53,7 +53,11 @@ ALTER TABLE sales ADD COLUMN IF NOT EXISTS actor_name TEXT;
 ALTER TABLE sales ADD COLUMN IF NOT EXISTS client_sale_id UUID;
 ALTER TABLE sales ADD COLUMN IF NOT EXISTS request_hash TEXT;
 ALTER TABLE sales ADD COLUMN IF NOT EXISTS returned_amount NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (returned_amount >= 0 AND returned_amount <= total_amount);
-CREATE UNIQUE INDEX IF NOT EXISTS sales_idempotency ON sales(user_id, client_sale_id);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sales' AND column_name='business_id') THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS sales_idempotency ON sales(user_id, client_sale_id);
+  END IF;
+END $$;
 ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS returned_quantity NUMERIC(14,3) NOT NULL DEFAULT 0 CHECK (returned_quantity >= 0 AND returned_quantity <= quantity);
 ALTER TABLE credit_sales ADD COLUMN IF NOT EXISTS returned_amount NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (returned_amount >= 0);
 

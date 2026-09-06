@@ -37,6 +37,7 @@ import {
 import { decodeToken, getStoredToken } from '../lib/auth';
 import {
   APP_DATA_CHANGED_EVENT,
+  APP_TENANT_SWITCHING_EVENT,
   emptyData,
   loadData,
   saveData,
@@ -168,7 +169,7 @@ function mesclarDadosDoBanco(prev: AppData, serverData: AppData): AppData {
 export function AppDataProvider({ children }: { children: ReactNode }) {
   const getAuthenticatedUserId = () => {
     const token = getStoredToken();
-    return token ? decodeToken(token)?.sub ?? null : null;
+    return token ? decodeToken(token)?.tenantId ?? null : null;
   };
   const initialUserId = getAuthenticatedUserId();
   const activeUserIdRef = useRef<string | null>(initialUserId);
@@ -194,6 +195,16 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
     window.addEventListener(APP_DATA_CHANGED_EVENT, reloadAuthenticatedData);
     return () => window.removeEventListener(APP_DATA_CHANGED_EVENT, reloadAuthenticatedData);
+  }, []);
+
+  useEffect(() => {
+    const clearForTenantSwitch = () => {
+      activeUserIdRef.current = null;
+      setLoadedUserId(null);
+      setData(emptyData);
+    };
+    window.addEventListener(APP_TENANT_SWITCHING_EVENT, clearForTenantSwitch);
+    return () => window.removeEventListener(APP_TENANT_SWITCHING_EVENT, clearForTenantSwitch);
   }, []);
 
   useEffect(() => {

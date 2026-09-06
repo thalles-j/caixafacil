@@ -30,6 +30,8 @@ const AdminSettings = lazy(() => import('./pages/admin/AdminSettings'));
 const Operadores = lazy(() => import('./pages/Operadores'));
 const Termos = lazy(() => import('./pages/Termos'));
 const Privacidade = lazy(() => import('./pages/Privacidade'));
+const Negocios = lazy(() => import('./pages/Negocios'));
+const ExtratoConsolidado = lazy(() => import('./pages/ExtratoConsolidado'));
 
 export default function App() {
   const { pathname } = useLocation();
@@ -37,7 +39,7 @@ export default function App() {
   const { data, loadedUserId } = useAppData();
   const onboardingConcluido = data.config?.onboardingConcluido ?? false;
 
-  if (isInitializing || (user && loadedUserId !== user.id)) {
+  if (isInitializing || (user?.role === 'client' && loadedUserId !== user.tenantId)) {
     if (pathname !== '/' && pathname !== '/login' && pathname !== '/suporte') return null;
     return <LoadingScreen />;
   }
@@ -117,8 +119,10 @@ export default function App() {
           <Route path="/relatorios/diario/:dataRelatorio" element={owner ? <RelatoriosCaixa /> : <Navigate to="/caixa" replace />} />
           <Route path="/relatorios/semanal/:periodo" element={owner ? <RelatorioPeriodo tipo="semanal" /> : <Navigate to="/caixa" replace />} />
           <Route path="/relatorios/mensal/:periodo" element={owner ? <RelatorioPeriodo tipo="mensal" /> : <Navigate to="/caixa" replace />} />
+          <Route path="/relatorios/consolidado/:tipo/:periodo" element={owner ? <ExtratoConsolidado /> : <Navigate to="/caixa" replace />} />
           <Route path="/configuracoes" element={owner ? <Configuracoes /> : <Navigate to="/caixa" replace />} />
           <Route path="/operadores" element={owner ? <Operadores /> : <Navigate to="/caixa" replace />} />
+          <Route path="/negocios" element={owner ? <Negocios /> : <Navigate to="/caixa" replace />} />
           <Route path="/termos" element={<Termos />} />
           <Route path="/privacidade" element={<Privacidade />} />
           <Route path="/admin/*" element={<Navigate to="/dashboard" replace />} />

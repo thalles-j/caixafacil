@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { House, Calculator, Package, CurrencyDollar, List, Receipt, ChartBar } from '@phosphor-icons/react';
+import { House, Calculator, Package, CurrencyDollar, List, Receipt, ChartBar, Buildings } from '@phosphor-icons/react';
 import { useAppData } from '../context/AppDataContext';
 import { useAuth } from '../context/AuthContext';
 
@@ -16,6 +16,7 @@ const operatorItems = [
   { to: '/catalogo', label: 'Catálogo', Icon: Package },
   { to: '/entradas', label: 'Vendas', Icon: Receipt },
 ];
+const businessItem = { to: '/negocios', label: 'Meus negócios', Icon: Buildings };
 
 export default function BottomNav({ informacoesVisiveis }: { informacoesVisiveis: boolean }) {
   useAppData();
@@ -85,6 +86,29 @@ export default function BottomNav({ informacoesVisiveis }: { informacoesVisiveis
             </NavLink>
           ))}
         </div>
+        {user?.tenantRole === 'OWNER' && (
+          <div className="mt-auto w-full border-t border-line pt-4">
+            <NavLink
+              to={businessItem.to}
+              title={businessItem.label}
+              aria-label={businessItem.label}
+              className={({ isActive }) =>
+                `mx-auto flex h-11 w-11 items-center justify-center gap-3 rounded-xl border text-sm font-semibold transition lg:h-auto lg:w-full lg:px-3 lg:py-3 lg:justify-start ${
+                  isActive
+                    ? 'border-ledger/40 bg-ledger/10 text-ledger shadow-sm lg:border-ledger lg:bg-ledger lg:text-paper'
+                    : 'border-transparent text-ledger hover:border-ledger/30 hover:bg-ledger/10 lg:border-ledger/30 lg:bg-ledger/10 lg:hover:border-ledger/50 lg:hover:bg-ledger/15'
+                }`
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <businessItem.Icon size={22} weight={isActive ? 'fill' : 'duotone'} />
+                  <span className="hidden lg:inline">{businessItem.label}</span>
+                </>
+              )}
+            </NavLink>
+          </div>
+        )}
       </aside>
     </>
   );

@@ -1,8 +1,13 @@
-import 'dotenv/config';
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import bcrypt from 'bcryptjs';
+import dotenv from 'dotenv';
 import pg from 'pg';
-import { ADMIN_BUSINESS_TABLES_TO_CLEAR, ADMIN_PASSWORD, ADMIN_USERS, DEMO_PASSWORD, DEMO_USERS } from './seedData.js';
+import {
+  ADMIN_PASSWORD, ADMIN_USERS, DEMO_BUSINESSES, DEMO_PASSWORD, DEMO_USERS, OPERATOR_PASSWORD,
+} from './seedData.js';
+
+dotenv.config({ path: fileURLToPath(new URL('../.env', import.meta.url)) });
 
 const { Pool } = pg;
 const databaseUrl = process.env.DATABASE_URL;
@@ -21,6 +26,8 @@ const pool = new Pool({
 });
 
 const RESET_DATABASE = process.argv.includes('--reset');
+const REFRESH_DEMO = process.argv.includes('--refresh-demo');
+let currentSeedActor = null;
 
 const CATEGORY_DEFINITIONS = [
   ['bebidas', 'Bebidas'], ['alimentos', 'Alimentos'], ['doces', 'Doces'],
@@ -99,6 +106,7 @@ async function applySchema() {
     './migrations/0003_admin_account_management/migration.sql',
     './migrations/0004_tenant_operations/migration.sql',
     './migrations/0005_privacy/migration.sql',
+    './migrations/0006_multi_business/migration.sql',
   ];
   for (const migrationPath of migrationPaths) {
     const schema = await readFile(new URL(migrationPath, import.meta.url), 'utf8');
@@ -110,14 +118,52 @@ async function resetDatabase() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('TRUNCATE admin_audit_logs');
-    for (const table of [
-      'transactions', 'credit_sales', 'sale_items', 'sales', 'cash_sessions',
-      'fixed_expenses', 'products', 'categories', 'customers', 'password_reset_tokens',
-    ]) await client.query(`DELETE FROM ${table}`);
-    const result = await client.query('DELETE FROM users');
+    const result = await client.query(`TRUNCATE TABLE
+      auth_sessions, privacy_erasure_tombstones, admin_audit_logs, transactions,
+      credit_sales, sale_items, sales, cash_sessions, fixed_expenses, products,
+      categories, customers, business_settings, business_memberships,
+      tenant_memberships, businesses, password_reset_tokens, users CASCADE`);
     await client.query('COMMIT');
-    console.log(`Banco reiniciado: ${result.rowCount ?? 0} conta(s) removida(s).`);
+    console.log(`Banco reiniciado para receber a demonstração rica (${result.command}).`);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function refreshDemoAccounts() {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const owners = await client.query('SELECT id FROM users WHERE email=ANY($1::citext[])', [DEMO_USERS.map(user => user.email)]);
+    const ownerIds = owners.rows.map(row => row.id);
+    if (ownerIds.length) {
+      const businesses = await client.query('SELECT id FROM businesses WHERE owner_user_id=ANY($1::uuid[])', [ownerIds]);
+      const businessIds = businesses.rows.map(row => row.id);
+      const operators = businessIds.length
+        ? await client.query(`SELECT user_id AS id FROM business_memberships
+            WHERE business_id=ANY($1::uuid[]) AND role='OPERATOR'`, [businessIds])
+        : { rows: [] };
+      const accountIds = [...new Set([...ownerIds, ...operators.rows.map(row => row.id)])];
+      await client.query('ALTER TABLE admin_audit_logs DISABLE TRIGGER audit_immutable');
+      await client.query(`DELETE FROM admin_audit_logs WHERE
+        business_id=ANY($1::uuid[]) OR actor_id=ANY($2::uuid[]) OR target_user_id=ANY($2::uuid[])`,
+      [businessIds, accountIds]);
+      await client.query('ALTER TABLE admin_audit_logs ENABLE TRIGGER audit_immutable');
+      await client.query(`DELETE FROM auth_sessions WHERE business_id=ANY($1::uuid[])
+        OR user_id=ANY($2::uuid[]) OR actor_id=ANY($2::uuid[])`, [businessIds, accountIds]);
+      await client.query('DELETE FROM privacy_erasure_tombstones WHERE business_id=ANY($1::uuid[])', [businessIds]);
+      for (const table of [
+        'transactions', 'credit_sales', 'sale_items', 'sales', 'cash_sessions',
+        'fixed_expenses', 'products', 'categories', 'customers', 'business_settings',
+      ]) await client.query(`DELETE FROM ${table} WHERE business_id=ANY($1::uuid[])`, [businessIds]);
+      await client.query('DELETE FROM businesses WHERE id=ANY($1::uuid[])', [businessIds]);
+      await client.query('DELETE FROM users WHERE id=ANY($1::uuid[])', [accountIds]);
+    }
+    await client.query('COMMIT');
+    console.log(`Contas de demonstração atualizadas: ${ownerIds.length} proprietário(s) anterior(es) removido(s).`);
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -186,8 +232,18 @@ async function seedCustomers(client, user) {
   for (const [index, name] of names.entries()) {
     const id = await insertReturningId(
       client,
-      'INSERT INTO customers (name, phone, email) VALUES ($1, $2, $3) RETURNING id',
-      [name, `(11) 9${String(1000 + index).padStart(4, '0')}-${String(2000 + index).padStart(4, '0')}`, `cliente${index + 1}.${user.name.toLowerCase()}@example.com`],
+      `INSERT INTO customers
+        (name, phone, email, notes, whatsapp_consent_at, whatsapp_consent_version, whatsapp_consent_recorded_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [
+        name,
+        `(11) 9${String(1000 + index).padStart(4, '0')}-${String(2000 + index).padStart(4, '0')}`,
+        `cliente${index + 1}.${user.name.toLowerCase()}@example.com`,
+        index % 5 === 0 ? 'Prefere contato no período da tarde.' : null,
+        index % 3 === 0 ? minutesAgo(4_000 - index * 20) : null,
+        index % 3 === 0 ? '2026-09-01' : null,
+        index % 3 === 0 ? currentSeedActor.id : null,
+      ],
     );
     customers.push({ id, name });
   }
@@ -214,9 +270,11 @@ async function seedImmediateSale(client, { sessionId, item, quantity, paymentMet
   const total = money(item.price * quantity);
   const saleId = await insertReturningId(
     client,
-    `INSERT INTO sales (cash_session_id, description, payment_method, total_amount, sold_at)
-     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [sessionId, description ?? `Venda de ${item.name}`, paymentMethod, total, occurredAt],
+    `INSERT INTO sales
+       (cash_session_id, description, payment_method, total_amount, sold_at, actor_id, actor_name)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    [sessionId, description ?? `Venda de ${item.name}`, paymentMethod, total, occurredAt,
+      currentSeedActor.id, currentSeedActor.name],
   );
   await client.query(
     `INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, unit_cost)
@@ -324,9 +382,11 @@ async function seedCreditSales(client, { customers, sessions, catalog }) {
     const soldAt = timeOnDate(session.date, 14, index % 50);
     const saleId = await insertReturningId(
       client,
-      `INSERT INTO sales (cash_session_id, customer_id, description, payment_method, total_amount, sold_at)
-       VALUES ($1, $2, $3, 'fiado', $4, $5) RETURNING id`,
-      [session.id, customer.id, `Fiado — ${item.name}`, total, soldAt],
+      `INSERT INTO sales
+        (cash_session_id, customer_id, description, payment_method, total_amount, sold_at, actor_id, actor_name)
+       VALUES ($1, $2, $3, 'fiado', $4, $5, $6, $7) RETURNING id`,
+      [session.id, customer.id, `Fiado — ${item.name}`, total, soldAt,
+        currentSeedActor.id, currentSeedActor.name],
     );
     await client.query(
       `INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, unit_cost)
@@ -414,38 +474,96 @@ async function seedOpenSession(client, { user, factor, catalog, fixedExpenses, c
   }
 }
 
-async function seedTenant(client, user, passwordHash) {
+async function seedOperator(client, owner, business, profile, passwordHash) {
+  const email = `operador.${profile.key}.${owner.email}`;
+  const name = `${profile.key === 'studio' ? 'Camila' : profile.key === 'mercado' ? 'Rafael' : 'Marina'} — ${profile.name}`;
+  const actorId = await insertReturningId(client,
+    `INSERT INTO users (email,password_hash,name,role,account_kind,status)
+     VALUES($1,$2,$3,'client','operator','active') RETURNING id`,
+    [email, passwordHash, name]);
+  await client.query(`INSERT INTO business_memberships(user_id,business_id,role)
+    VALUES($1,$2,'OPERATOR')`, [actorId, business.id]);
+  await client.query(`INSERT INTO tenant_memberships(actor_id,user_id,role)
+    VALUES($1,$2,'OPERATOR') ON CONFLICT(actor_id) DO NOTHING`, [actorId, owner.id]);
+  return { id: actorId, name, email };
+}
+
+async function seedAuditTrail(client, { owner, business, operator, customers }) {
+  const events = [
+    [owner.id, 'OWNER', operator.id, 'operator.created', { operatorName: operator.name }],
+    [owner.id, 'OWNER', business.id, 'business.settings_updated', { fields: ['receiptSettings', 'idleTimeoutMinutes'] }],
+    [operator.id, 'OPERATOR', operator.id, 'business.post', { path: '/api/business/sales' }],
+    [operator.id, 'OPERATOR', customers[0].id, 'customer.whatsapp_consent_granted', { version: '2026-09-01' }],
+    [operator.id, 'OPERATOR', customers[0].id, 'customer.whatsapp_charge_prepared', { consentVersion: '2026-09-01' }],
+    [operator.id, 'OPERATOR', customers[1].id, 'customer.whatsapp_consent_revoked', { version: null }],
+    [operator.id, 'OPERATOR', business.id, 'cash.closing_corrected', { reason: 'Conferência do fundo de troco' }],
+    [operator.id, 'OPERATOR', business.id, 'sale.item_returned', { quantity: 1, amount: 8, reason: 'Produto devolvido sem uso' }],
+    [owner.id, 'OWNER', business.id, 'privacy.export_requested', { scope: 'active-business' }],
+  ];
+  for (const [index, [actorId, actorRole, targetId, action, details]] of events.entries()) {
+    await client.query(
+      `INSERT INTO admin_audit_logs
+        (user_id,business_id,actor_id,actor_role,target_user_id,action,details,created_at)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [owner.id, business.id, actorId, actorRole, targetId, action, JSON.stringify(details),
+        minutesAgo(500 - index * 25)],
+    );
+  }
+}
+
+async function seedTenant(client, user, passwordHash, operatorPasswordHash) {
   await client.query('BEGIN');
   try {
-    const userId = await insertReturningId(
+    const ownerId = await insertReturningId(
       client,
       "INSERT INTO users (email, password_hash, name, account_kind) VALUES ($1, $2, $3, 'owner') RETURNING id",
       [user.email, passwordHash, user.name],
     );
     await client.query(`INSERT INTO tenant_memberships(actor_id,user_id,role)
-      VALUES($1,$1,'OWNER') ON CONFLICT(actor_id) DO UPDATE SET user_id=excluded.user_id,role='OWNER',active=true`, [userId]);
-    await client.query("SELECT set_config('app.current_user_id', $1, true)", [userId]);
-    await client.query(
-      `INSERT INTO business_settings
-        (user_id, business_name, business_category, offering, controls_stock,
-         daily_sales_goal, report_frequency, report_by_email, view_period, onboarding_completed)
-       VALUES ($1, $2, 'Alimentação (Mercado, Padaria...)', 'ambos', true, $3, 'ambos', false, 'day', true)`,
-      [userId, `${user.name} — Demonstração`, money(500, user.factor)],
-    );
-    const catalog = await seedCatalog(client, user.factor);
-    const customers = await seedCustomers(client, user);
-    const fixedExpenses = await seedFixedExpenses(client, user.factor);
-    const sessions = await seedHistoricalSessions(client, user, user.factor, catalog);
-    const credits = await seedCreditSales(client, { customers, sessions, catalog });
-    await seedOpenSession(client, { user, factor: user.factor, catalog, fixedExpenses, credits });
+      VALUES($1,$1,'OWNER')`, [ownerId]);
+    const owner = { ...user, id: ownerId };
+    const totals = { businesses: 0, operators: 0, products: 0, customers: 0, closedSessions: 0, creditSales: 0, auditEvents: 0 };
+    for (const [index, profile] of DEMO_BUSINESSES.entries()) {
+      const businessId = await insertReturningId(client,
+        `INSERT INTO businesses(owner_user_id,name,category,offering)
+         VALUES($1,$2,$3,$4) RETURNING id`,
+        [ownerId, `${profile.name} — ${user.name}`, profile.category, profile.offering]);
+      const business = { id: businessId, ...profile };
+      await client.query(`INSERT INTO business_memberships(user_id,business_id,role)
+        VALUES($1,$2,'OWNER')`, [ownerId, businessId]);
+      await client.query("SELECT set_config('app.current_user_id', $1, true)", [ownerId]);
+      await client.query("SELECT set_config('app.current_business_id', $1, true)", [businessId]);
+      await client.query(
+        `INSERT INTO business_settings
+          (user_id,business_id,business_name,business_category,offering,controls_stock,
+           daily_sales_goal,report_frequency,report_by_email,report_email,view_period,
+           onboarding_completed,idle_timeout_minutes,receipt_settings)
+         VALUES($1,$2,$3,$4,$5,true,$6,'ambos',true,$7,$8,true,$9,$10)`,
+        [ownerId, businessId, `${profile.name} — ${user.name}`, profile.category, profile.offering,
+          money(650 + index * 225, user.factor * profile.factor), user.email,
+          index % 2 ? 'week' : 'day', 10 + index * 5,
+          JSON.stringify({ paperWidth: index % 2 ? 58 : 80, showOperator: true, showPaymentMethod: true })],
+      );
+      const operator = await seedOperator(client, owner, business, profile, operatorPasswordHash);
+      currentSeedActor = operator;
+      const factor = user.factor * profile.factor;
+      const catalog = await seedCatalog(client, factor);
+      const customers = await seedCustomers(client, { ...user, name: `${user.name}.${profile.key}` });
+      const fixedExpenses = await seedFixedExpenses(client, factor);
+      const sessions = await seedHistoricalSessions(client, { ...user, name: operator.name }, factor, catalog);
+      const credits = await seedCreditSales(client, { customers, sessions, catalog });
+      await seedOpenSession(client, { user: { ...user, name: operator.name }, factor, catalog, fixedExpenses, credits });
+      await seedAuditTrail(client, { owner, business, operator, customers });
+      totals.businesses += 1;
+      totals.operators += 1;
+      totals.products += PRODUCT_DEFINITIONS.length + SERVICE_DEFINITIONS.length;
+      totals.customers += customers.length;
+      totals.closedSessions += sessions.length;
+      totals.creditSales += credits.length;
+      totals.auditEvents += 9;
+    }
     await client.query('COMMIT');
-    return {
-      products: PRODUCT_DEFINITIONS.length + SERVICE_DEFINITIONS.length,
-      customers: customers.length,
-      fixedExpenses: FIXED_EXPENSE_DEFINITIONS.length,
-      closedSessions: sessions.length,
-      creditSales: credits.length,
-    };
+    return totals;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -455,7 +573,7 @@ async function seedTenant(client, user, passwordHash) {
 async function seedAdmin(client, admin, passwordHash) {
   await client.query('BEGIN');
   try {
-    const userResult = await client.query(
+    await client.query(
       `INSERT INTO users (email, password_hash, name, role, status)
        VALUES ($1, $2, $3, 'admin', 'active')
        ON CONFLICT (email) DO UPDATE SET
@@ -468,19 +586,6 @@ async function seedAdmin(client, admin, passwordHash) {
        RETURNING id`,
       [admin.email, passwordHash, admin.name],
     );
-    const userId = userResult.rows[0].id;
-    await client.query("SELECT set_config('app.current_user_id', $1, true)", [userId]);
-    for (const table of ADMIN_BUSINESS_TABLES_TO_CLEAR) {
-      await client.query(`DELETE FROM ${table} WHERE user_id = $1`, [userId]);
-    }
-    await client.query(
-      `INSERT INTO business_settings
-        (user_id, business_name, business_category, offering, controls_stock,
-         report_frequency, report_by_email, view_period, onboarding_completed)
-       VALUES ($1, 'Administração CaixaFácil', 'Administração', 'ambos', false,
-               'nenhum', false, 'day', true)`,
-      [userId],
-    );
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -492,8 +597,10 @@ async function main() {
   console.log('Aplicando schema...');
   await applySchema();
   if (RESET_DATABASE) await resetDatabase();
+  else if (REFRESH_DEMO) await refreshDemoAccounts();
   const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
   const adminPasswordHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
+  const operatorPasswordHash = await bcrypt.hash(OPERATOR_PASSWORD, 10);
   const client = await pool.connect();
   try {
     for (const user of DEMO_USERS) {
@@ -509,10 +616,11 @@ async function main() {
         console.log(`Conta ${user.email} ja existe; senha de demonstracao atualizada e dados preservados. Use --reset para recriar os dados.`);
         continue;
       }
-      const summary = await seedTenant(client, user, passwordHash);
+      const summary = await seedTenant(client, user, passwordHash, operatorPasswordHash);
       console.log(
-        `Seed de ${user.email}: ${summary.products} itens, ${summary.customers} clientes, ` +
-        `${summary.fixedExpenses} despesas fixas, ${summary.closedSessions} fechamentos e ${summary.creditSales} fiados.`,
+        `Seed de ${user.email}: ${summary.businesses} negócios, ${summary.operators} operadores, ` +
+        `${summary.products} itens, ${summary.customers} clientes, ${summary.closedSessions} fechamentos, ` +
+        `${summary.creditSales} fiados e ${summary.auditEvents} eventos de auditoria.`,
       );
     }
     for (const admin of ADMIN_USERS) {
@@ -522,7 +630,8 @@ async function main() {
   } finally {
     client.release();
   }
-  console.log(`Dados de demonstracao criados. Relatorios historicos: janeiro a abril de ${REPORT_YEAR}.`);
+  console.log(`Demonstração rica criada. Relatórios históricos: janeiro a abril de ${REPORT_YEAR}.`);
+  console.log(`Operadores usam a senha ${OPERATOR_PASSWORD}.`);
 }
 
 try {

@@ -16,7 +16,7 @@
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "db:schema": "npm run db:schema --workspace backend",
-    "db:seed": "npm run seed --workspace backend --"
+    "db:seed": "node backend/prisma/seed.js"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
