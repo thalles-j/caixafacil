@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
-import { Bell, GearSix, Moon, Sun } from '@phosphor-icons/react';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Bell, GearSix, Moon, Sun, X } from '@phosphor-icons/react';
 import { useAppData } from '../context/AppDataContext';
 import { useAuth } from '../context/AuthContext';
 import { getCategoryTheme } from '../lib/categoryThemes';
@@ -27,6 +27,7 @@ export type LayoutOutletContext = {
 export default function Layout() {
   const { data, totalNotificacoes, contasVencidas, contasVencendoEmBreve } = useAppData();
   const navigate = useNavigate();
+  const location = useLocation();
   const [dark, setDark] = useDarkMode();
   const [informacoesVisiveis, setInformacoesVisiveis] = useState(
     () => window.localStorage.getItem(PRIVACY_STORAGE_KEY) !== 'true',
@@ -38,6 +39,7 @@ export default function Layout() {
   const theme = getCategoryTheme(data.config?.categoria);
   const Icon = theme.icon;
   const { user } = useAuth();
+  const naPaginaDeNegocios = location.pathname === '/negocios';
 
   useEffect(() => {
     if (!notificacoesAbertas) return;
@@ -78,16 +80,23 @@ export default function Layout() {
           <div className="mx-auto flex max-w-md items-center justify-between sm:max-w-xl lg:max-w-5xl">
             <div className="flex min-w-0 items-center gap-3">
               {user?.tenantRole === 'OWNER' ? (
-                <button
-                  type="button"
-                  onClick={() => navigate('/negocios')}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-paper shadow-sm transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ledger focus-visible:ring-offset-2 focus-visible:ring-offset-paper-raised"
-                  style={{ backgroundColor: theme.accent }}
-                  aria-label="Abrir Meus negócios"
-                  title="Meus negócios"
-                >
-                  <Icon size={18} weight="fill" />
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => navigate(naPaginaDeNegocios ? '/' : '/negocios')}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-paper shadow-sm transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ledger focus-visible:ring-offset-2 focus-visible:ring-offset-paper-raised md:hidden"
+                    style={{ backgroundColor: theme.accent }}
+                    aria-label={naPaginaDeNegocios ? 'Voltar ao início' : 'Abrir Meus negócios'}
+                  >
+                    {naPaginaDeNegocios ? <X size={20} weight="bold" /> : <Icon size={18} weight="fill" />}
+                  </button>
+                  <div
+                    className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-xl text-paper md:flex"
+                    style={{ backgroundColor: theme.accent }}
+                  >
+                    <Icon size={18} weight="fill" />
+                  </div>
+                </>
               ) : (
                 <div
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-paper"
