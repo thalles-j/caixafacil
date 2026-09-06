@@ -2,11 +2,14 @@ import { useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowRight,
+  Briefcase,
+  Database,
   DownloadSimple,
   EnvelopeSimple,
   Headset,
   Key,
   Moon,
+  PaintBrush,
   PaperPlaneTilt,
   Plus,
   Timer,
@@ -16,6 +19,7 @@ import {
   Sun,
   Trash,
   UploadSimple,
+  UserCircle,
   Warning,
 } from '@phosphor-icons/react';
 import { useAppData } from '../context/AppDataContext';
@@ -37,6 +41,18 @@ import { paginateItems } from '../lib/pagination';
 import { sendReportEmailRequest } from '../lib/business';
 import ReceiptSettingsFields from '../components/ReceiptSettingsFields';
 import { DEFAULT_RECEIPT_SETTINGS } from '../lib/printing';
+
+type SecaoConfiguracoes = 'perfil' | 'negocio' | 'colaboradores' | 'financeiro' | 'aparencia' | 'dados' | 'ajuda';
+
+const secoesConfiguracoes = [
+  { id: 'perfil', nome: 'Perfil e segurança', descricao: 'Acesso e senha', Icon: UserCircle },
+  { id: 'negocio', nome: 'Negócio e PDV', descricao: 'Dados, caixa e impressão', Icon: Briefcase },
+  { id: 'colaboradores', nome: 'Colaboradores', descricao: 'Equipe e sessões', Icon: UsersThree },
+  { id: 'financeiro', nome: 'Financeiro', descricao: 'Despesas e relatórios', Icon: PaperPlaneTilt },
+  { id: 'aparencia', nome: 'Aparência', descricao: 'Tema do aplicativo', Icon: PaintBrush },
+  { id: 'dados', nome: 'Backups e dados', descricao: 'Exportação e restauração', Icon: Database },
+  { id: 'ajuda', nome: 'Ajuda', descricao: 'Atendimento e suporte', Icon: Headset },
+] satisfies Array<{ id: SecaoConfiguracoes; nome: string; descricao: string; Icon: typeof UserCircle }>;
 
 export default function Configuracoes() {
   const { data, setConfig, resetData, cadastrarDespesaFixaNoBanco, removerDespesaFixaNoBanco } = useAppData();
@@ -65,6 +81,7 @@ export default function Configuracoes() {
   const [senhaErro, setSenhaErro] = useState<string | null>(null);
   const [senhaSucesso, setSenhaSucesso] = useState<string | null>(null);
   const [paginaDespesasFixas, setPaginaDespesasFixas] = useState(1);
+  const [secaoAtiva, setSecaoAtiva] = useState<SecaoConfiguracoes>('perfil');
   const arquivoInputRef = useRef<HTMLInputElement>(null);
 
   const despesasFixasPaginadas = paginateItems(config?.despesasFixas ?? [], paginaDespesasFixas);
@@ -251,18 +268,55 @@ export default function Configuracoes() {
     'w-full rounded-lg border border-line bg-paper p-2 text-ink focus:outline-none focus:ring-2 focus:ring-ledger/30';
 
   return (
-    <div className="fade-in space-y-8 lg:grid lg:grid-cols-2 lg:gap-8 lg:space-y-0">
-      <header className="lg:col-span-2">
+    <div className="fade-in space-y-6">
+      <header>
         <h2 className="font-display text-2xl font-bold text-ink">Configurações</h2>
-        <p className="mt-1 text-sm text-ink-soft">Organize sua conta, seu negócio e as preferências do CaixaFácil.</p>
+        <p className="mt-1 text-sm text-ink-soft">Escolha uma área para organizar sua conta e seu negócio.</p>
       </header>
 
-      <section className="rounded-2xl border border-line bg-paper-raised p-5 shadow-sm sm:p-6">
+      <div className="rounded-2xl border border-line bg-paper-raised p-3 shadow-sm">
+        <label className="block sm:hidden">
+          <span className="mb-2 block text-xs font-bold uppercase tracking-wide text-ink-soft">Área das configurações</span>
+          <select
+            value={secaoAtiva}
+            onChange={(event) => setSecaoAtiva(event.target.value as SecaoConfiguracoes)}
+            className="w-full rounded-xl border border-line bg-paper px-3 py-3 text-sm font-semibold text-ink outline-none focus:ring-2 focus:ring-ledger/30"
+          >
+            {secoesConfiguracoes.map(({ id, nome }) => <option key={id} value={id}>{nome}</option>)}
+          </select>
+        </label>
+        <nav aria-label="Áreas das configurações" className="hidden grid-cols-2 gap-2 sm:grid lg:grid-cols-4 xl:grid-cols-7">
+          {secoesConfiguracoes.map(({ id, nome, descricao, Icon }) => {
+            const ativa = secaoAtiva === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setSecaoAtiva(id)}
+                aria-current={ativa ? 'page' : undefined}
+                className={`flex min-h-20 items-start gap-3 rounded-xl border px-3 py-3 text-left transition ${
+                  ativa
+                    ? 'border-ledger/40 bg-ledger/10 text-ledger-strong shadow-sm dark:text-ledger'
+                    : 'border-transparent text-ink-soft hover:border-line hover:bg-paper'
+                }`}
+              >
+                <Icon size={20} weight={ativa ? 'fill' : 'duotone'} className="mt-0.5 shrink-0" />
+                <span className="min-w-0">
+                  <strong className="block text-sm leading-tight text-current">{nome}</strong>
+                  <span className="mt-1 block text-[11px] leading-tight opacity-80">{descricao}</span>
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      <section className={`${secaoAtiva === 'negocio' ? '' : 'hidden'} rounded-2xl border border-line bg-paper-raised p-5 shadow-sm sm:p-6`}>
         <ReceiptSettingsFields value={config.receiptSettings ?? DEFAULT_RECEIPT_SETTINGS}
           onChange={receiptSettings => salvarCampo({ receiptSettings })} />
       </section>
 
-      <section className="rounded-2xl border border-line bg-paper-raised p-5 shadow-sm sm:p-6">
+      <section className={`${secaoAtiva === 'colaboradores' ? '' : 'hidden'} rounded-2xl border border-line bg-paper-raised p-5 shadow-sm sm:p-6`}>
         <div className="mb-5 flex items-start gap-3 border-b border-line pb-4">
           <span className="rounded-xl bg-ledger/10 p-2.5 text-ledger-strong dark:text-ledger">
             <Timer size={21} weight="duotone" />
@@ -292,7 +346,7 @@ export default function Configuracoes() {
         </div>
       </section>
 
-      <section className="min-w-0 rounded-2xl border border-line bg-paper-raised p-5 shadow-sm sm:p-6 lg:col-span-2">
+      <section className={`${secaoAtiva === 'perfil' ? '' : 'hidden'} min-w-0 rounded-2xl border border-line bg-paper-raised p-5 shadow-sm sm:p-6`}>
         <div className="mb-4 flex items-start gap-3 border-b border-line pb-4">
           <span className="rounded-xl bg-ledger/10 p-2.5 text-ledger-strong dark:text-ledger">
             <ShieldCheck size={21} weight="duotone" />
@@ -384,7 +438,7 @@ export default function Configuracoes() {
         </div>
       </section>
 
-      <section className="min-w-0 rounded-2xl border border-line bg-paper-raised p-4 shadow-sm">
+      <section className={`${secaoAtiva === 'negocio' ? '' : 'hidden'} min-w-0 rounded-2xl border border-line bg-paper-raised p-5 shadow-sm sm:p-6`}>
         <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-ink-soft">Negócio</h3>
         <div className="space-y-5">
           <div>
@@ -455,8 +509,8 @@ export default function Configuracoes() {
         </div>
       </section>
 
-      <div className="min-w-0 space-y-8">
-        <section className="rounded-2xl border border-line bg-paper-raised p-4 shadow-sm">
+      <div className="contents">
+        <section className={`${secaoAtiva === 'aparencia' ? '' : 'hidden'} rounded-2xl border border-line bg-paper-raised p-5 shadow-sm sm:p-6`}>
           <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-ink-soft">Aparência</h3>
           <label className="flex items-center justify-between gap-3">
             <span className="flex items-center gap-2 text-xs font-medium text-ink-soft">
@@ -471,7 +525,7 @@ export default function Configuracoes() {
           </label>
         </section>
 
-        <section className="rounded-2xl border border-line bg-paper-raised p-4 shadow-sm">
+        <section className={`${secaoAtiva === 'ajuda' ? '' : 'hidden'} rounded-2xl border border-line bg-paper-raised p-5 shadow-sm sm:p-6`}>
           <div className="flex items-start gap-3">
             <span className="rounded-xl bg-ledger/10 p-2.5 text-ledger-strong dark:text-ledger">
               <Headset size={20} weight="duotone" />
@@ -491,7 +545,7 @@ export default function Configuracoes() {
           </Link>
         </section>
 
-        <section className="rounded-2xl border border-line bg-paper-raised p-4 shadow-sm">
+        <section className={`${secaoAtiva === 'financeiro' ? '' : 'hidden'} rounded-2xl border border-line bg-paper-raised p-5 shadow-sm sm:p-6`}>
           <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-ink-soft">Despesas Fixas</h3>
           <ul className="mb-3 space-y-2">
             {config.despesasFixas.length === 0 && (
@@ -554,7 +608,7 @@ export default function Configuracoes() {
           </form>
         </section>
 
-        <section className="rounded-2xl border border-line bg-paper-raised p-4 shadow-sm">
+        <section className={`${secaoAtiva === 'financeiro' ? '' : 'hidden'} rounded-2xl border border-line bg-paper-raised p-5 shadow-sm sm:p-6`}>
           <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-ink-soft">Relatórios</h3>
           {configErro && <p role="alert" className="mb-3 text-xs font-medium text-stamp">{configErro}</p>}
           <div className="space-y-5">
@@ -607,7 +661,7 @@ export default function Configuracoes() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-line bg-paper-raised p-4 shadow-sm">
+        <section className={`${secaoAtiva === 'dados' ? '' : 'hidden'} rounded-2xl border border-line bg-paper-raised p-5 shadow-sm sm:p-6`}>
           <h3 className="mb-1 text-sm font-bold uppercase tracking-wide text-ink-soft">Backup</h3>
           <p className="mb-3 text-xs text-ink-soft">
             Seus dados operacionais ficam no PostgreSQL/Neon. Este arquivo exporta somente o negócio ativo: catálogo, clientes, caixas, vendas,
@@ -639,7 +693,7 @@ export default function Configuracoes() {
           {importErro && <p className="mt-2 text-xs font-medium text-stamp">{importErro}</p>}
         </section>
 
-        <div className="rounded-2xl border border-stamp/20 p-4">
+        <div className={`${secaoAtiva === 'dados' ? '' : 'hidden'} rounded-2xl border border-stamp/20 bg-paper-raised p-5 shadow-sm sm:p-6`}>
           <h3 className="mb-1 text-xs font-bold uppercase tracking-wide text-stamp">Zona de risco</h3>
           <p className="mb-3 text-xs text-ink-soft">
             Apaga produtos, vendas, fiado, despesas, caixas e configurações. Seu e-mail e senha são mantidos. Ao

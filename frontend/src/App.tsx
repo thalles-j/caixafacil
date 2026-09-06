@@ -18,6 +18,7 @@ const FecharCaixa = lazy(() => import('./pages/FecharCaixa'));
 const Catalogo = lazy(() => import('./pages/Catalogo'));
 const Financas = lazy(() => import('./pages/Financas'));
 const Configuracoes = lazy(() => import('./pages/Configuracoes'));
+const ConfiguracoesColaborador = lazy(() => import('./pages/ConfiguracoesColaborador'));
 const Movimentacoes = lazy(() => import('./pages/Movimentacoes'));
 const RelatoriosCaixa = lazy(() => import('./pages/RelatoriosCaixa'));
 const RelatorioPeriodo = lazy(() => import('./pages/RelatorioPeriodo'));
@@ -120,7 +121,7 @@ export default function App() {
           <Route path="/relatorios/semanal/:periodo" element={owner ? <RelatorioPeriodo tipo="semanal" /> : <Navigate to="/caixa" replace />} />
           <Route path="/relatorios/mensal/:periodo" element={owner ? <RelatorioPeriodo tipo="mensal" /> : <Navigate to="/caixa" replace />} />
           <Route path="/relatorios/consolidado/:tipo/:periodo" element={owner ? <ExtratoConsolidado /> : <Navigate to="/caixa" replace />} />
-          <Route path="/configuracoes" element={owner ? <Configuracoes /> : <Navigate to="/caixa" replace />} />
+          <Route path="/configuracoes" element={owner ? <Configuracoes /> : <ConfiguracoesColaborador />} />
           <Route path="/operadores" element={owner ? <Operadores /> : <Navigate to="/caixa" replace />} />
           <Route path="/negocios" element={owner ? <Negocios /> : <Navigate to="/caixa" replace />} />
           <Route path="/termos" element={<Termos />} />

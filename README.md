@@ -1,210 +1,252 @@
-# CaixaFácil
+<div align="center">
+  <img src="frontend/public/icon-192.png" width="104" alt="Ícone do CaixaFácil">
+  <h1>CaixaFácil</h1>
+  <p><strong>Gestão de caixa, vendas e negócios em uma experiência simples e responsiva.</strong></p>
+  <p>
+    <a href="https://github.com/thalles-j/caixafacil/actions/workflows/ci.yml"><img src="https://github.com/thalles-j/caixafacil/actions/workflows/ci.yml/badge.svg" alt="Status do CI"></a>
+    <img src="https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs&amp;logoColor=white" alt="Node.js 22">
+    <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&amp;logoColor=111827" alt="React 19">
+    <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&amp;logoColor=white" alt="TypeScript 5">
+    <img src="https://img.shields.io/badge/PostgreSQL-Neon-4169E1?logo=postgresql&amp;logoColor=white" alt="PostgreSQL no Neon">
+  </p>
+</div>
 
-Aplicação organizada como um monorepo npm, com frontend e backend independentes.
+O CaixaFácil é uma aplicação full-stack para pequenos negócios controlarem a
+operação diária em um só lugar. O sistema reúne frente de caixa, catálogo,
+estoque, clientes, fiado, despesas, fechamentos e relatórios. Uma conta pode
+administrar até três negócios independentes e acompanhar os resultados de forma
+individual ou consolidada.
 
-## Estrutura
+O projeto funciona em computadores e celulares, possui perfis de proprietário e
+operador, suporta vendas temporariamente sem internet e mantém o isolamento dos
+dados de cada estabelecimento no backend e no PostgreSQL.
 
-```text
-.
-├── .claude/
-├── .github/workflows/
-├── backend/
-│   ├── prisma/
-│   │   ├── migrations/0001_init/migration.sql
-│   │   ├── migrations/0002_admin_panel/migration.sql
-│   │   ├── migrations/0003_admin_account_management/migration.sql
-│   │   ├── schema.prisma
-│   │   └── seed.js
-│   ├── src/
-│   │   ├── account/
-│   │   ├── auth/
-│   │   ├── business/
-│   │   ├── email.ts
-│   │   └── scripts/
-│   ├── .env.example
-│   ├── package.json
-│   └── tsconfig.json
-├── docs/
-│   ├── AUDITORIA.md
-│   └── RELATORIO_CENTRAL_DE_AJUDA.md
-├── frontend/
-│   ├── public/
-│   ├── src/
-│   ├── .env.example
-│   ├── package.json
-│   └── vite.config.ts
-├── package.json
-└── package-lock.json
+## Principais recursos
+
+| Área | Recursos |
+| --- | --- |
+| **Frente de caixa** | Vendas à vista e fiado, abertura e fechamento, entradas, saídas, gorjetas, baixa de estoque e correção de fechamento |
+| **PDV físico** | Cupom não fiscal em 58/80 mm, impressão ESC/POS por Web Serial, fallback HTML/PDF e pulso de gaveta |
+| **Operação offline** | Fila local em IndexedDB, sincronização idempotente e isolamento por negócio e operador |
+| **Multi-negócio** | Até três estabelecimentos por proprietário, troca de contexto e visão financeira consolidada |
+| **Catálogo e clientes** | Produtos, serviços, categorias, código de barras, estoque, paginação e histórico de clientes |
+| **Financeiro** | Fiado, recebimentos, despesas fixas, movimentações, relatórios por período e histórico de caixa |
+| **Equipe** | Contas de operador vinculadas a um único negócio e permissões limitadas à rotina do caixa |
+| **Privacidade** | Consentimento versionado para cobrança por WhatsApp e anonimização de dados pessoais |
+| **Administração** | Painel separado para contas da plataforma, suspensão, redefinição de senha e auditoria |
+| **Operação** | Health check com banco, logs correlacionados, integração opcional com Sentry e monitor de disponibilidade |
+
+## Perfis de acesso
+
+- **OWNER:** administra seus negócios, operadores, configurações, relatórios,
+  backups e dados da conta.
+- **OPERATOR:** acessa catálogo, clientes, caixa e vendas do estabelecimento ao
+  qual está vinculado. Não acessa relatórios consolidados, backups ou gestão da
+  conta.
+- **ADMIN:** gerencia metadados e estatísticas agregadas das contas da
+  plataforma, sem acesso às transações individuais dos estabelecimentos.
+
+## Arquitetura
+
+```mermaid
+flowchart LR
+    U[Computador ou celular] --> F[React + Vite]
+    F -->|HTTPS / JSON| A[Express + TypeScript]
+    A -->|Transações por tenant| D[(PostgreSQL / Neon)]
+    A -.-> E[Webhook de e-mail]
+    F -.-> S[Sentry opcional]
+    A -.-> S
 ```
 
-## Instalação
+O repositório é um monorepo npm com dois workspaces:
 
-Uma única instalação na raiz prepara os dois workspaces:
+- `frontend/`: React 19, TypeScript, Vite, Tailwind CSS e React Router;
+- `backend/`: Express, TypeScript, Prisma, PostgreSQL, JWT e bcrypt;
+- `docs/`: auditoria técnica e roteiros de PDV, privacidade e observabilidade.
+
+A API mantém o access token em memória e o refresh token em cookie HTTP-only.
+Toda requisição autenticada revalida o vínculo do usuário com o negócio ativo.
+As consultas usam transações por tenant e políticas RLS forçadas no banco.
+
+## Executando localmente
+
+### Requisitos
+
+- [Node.js 22](https://nodejs.org/)
+- npm
+- banco PostgreSQL; o projeto está preparado para o [Neon](https://neon.tech/)
+
+### 1. Instale as dependências
 
 ```bash
-npm install
+git clone https://github.com/thalles-j/caixafacil.git
+cd caixafacil
+npm ci
 ```
 
-Copie os exemplos de ambiente e preencha os segredos:
+### 2. Configure o ambiente
 
-```bash
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
+Copie [`backend/.env.example`](backend/.env.example) para `backend/.env` e
+[`frontend/.env.example`](frontend/.env.example) para `frontend/.env`.
+
+No PowerShell:
+
+```powershell
+Copy-Item backend/.env.example backend/.env
+Copy-Item frontend/.env.example frontend/.env
 ```
 
-O backend usa Neon Postgres. A URL pooled deve ficar em `DATABASE_URL`; uma
-`DATABASE_URL_UNPOOLED` pode ser informada apenas para operações de schema.
+Preencha ao menos `DATABASE_URL`, `JWT_ACCESS_SECRET` e `JWT_REFRESH_SECRET`.
+Use segredos longos, aleatórios e diferentes. Em desenvolvimento, o frontend
+usa `/api` e o proxy do Vite encaminha as chamadas para a porta `3000`.
 
-## Desenvolvimento
-
-```bash
-npm run dev
-```
-
-Esse comando inicia os dois workspaces, com logs identificados e coloridos:
-
-- `[FRONTEND]`: Vite em `http://localhost:5173`;
-- `[BACKEND]`: API em `http://localhost:3000`.
-
-Também é possível iniciar somente um lado com `npm run dev:frontend` ou
-`npm run dev:backend`.
-
-## Banco e Prisma
-
-O modelo declarativo fica em `backend/prisma/schema.prisma`. A migration SQL
-preserva recursos específicos do Postgres usados pelo projeto, como RLS,
-triggers, views, índices parciais e extensões.
+### 3. Prepare o banco
 
 ```bash
 npm run db:schema
 npm run db:seed
 ```
 
-A seed é não destrutiva por padrão. Para recriar os dados de demonstração no
-banco configurado, use explicitamente:
+### 4. Inicie a aplicação
 
 ```bash
-npm run db:seed -- --reset
+npm run dev
 ```
 
-Esse modo remove dados do banco apontado por `DATABASE_URL`; use somente em
-desenvolvimento.
+- Frontend: <http://localhost:5173>
+- API: <http://localhost:3000/api>
+- Health check: <http://localhost:3000/api/health>
 
-Para recriar apenas as contas de demonstração e preservar todas as demais
-contas do banco, use:
+Também é possível executar somente um workspace com `npm run dev:frontend` ou
+`npm run dev:backend`.
+
+## Dados de demonstração
+
+O seed padrão é não destrutivo. Para recriar apenas as contas de demonstração e
+preservar os demais usuários do banco:
 
 ```bash
 npm run db:seed -- --refresh-demo
 ```
 
-Cada uma das três contas de demonstração recebe três negócios independentes.
-Cada negócio possui catálogo com 30 itens, 22 clientes, operador próprio,
-consentimentos de WhatsApp, fiados em diferentes situações, despesas fixas,
-movimentações, caixa aberto, 20 fechamentos e uma trilha de auditoria com ações
-de OWNER e OPERATOR. Também são criados dados históricos de janeiro a abril
-para testar troca e consolidação de negócios, filtros, paginação e relatórios.
-Use `--reset` para recriar contas que já existam com toda essa massa. As
-credenciais dos proprietários são:
+Cada proprietário recebe três negócios completos. A massa inclui produtos e
+serviços, clientes, operadores, vendas históricas, caixas abertos e encerrados,
+fiados, despesas, consentimentos e eventos de auditoria. Ela permite demonstrar
+filtros, paginação, relatórios e consolidação entre negócios.
 
-- `thalles@gmail.com` / `Teste123@`;
-- `gustavo@gmail.com` / `Teste123@`;
-- `marco@gmail.com` / `Teste123@`.
+<details>
+<summary><strong>Credenciais locais de demonstração</strong></summary>
 
-Os operadores seguem o formato `operador.<negócio>.<email-do-dono>` e usam a
-senha `Operador123@`. Exemplo: `operador.cafeteria.thalles@gmail.com`.
+| Perfil | E-mail | Senha |
+| --- | --- | --- |
+| Proprietário | `thalles@gmail.com` | `Teste123@` |
+| Proprietário | `gustavo@gmail.com` | `Teste123@` |
+| Proprietário | `marco@gmail.com` | `Teste123@` |
+| Administrador | `thalles@admin.com` | `Admin123@` |
+| Administrador | `gustavo@admin.com` | `Admin123@` |
+| Administrador | `marco@admin.com` | `Admin123@` |
 
-O seed também cria três contas administrativas puras, sem catálogo, clientes,
-vendas, fiado ou caixas de demonstração:
+Os operadores usam a senha `Operador123@` e endereços no formato
+`operador.<negócio>.<nome>@gmail.com`. Exemplo:
+`operador.cafeteria.thalles@gmail.com`.
 
-- `thalles@admin.com` / `Admin123@`;
-- `gustavo@admin.com` / `Admin123@`;
-- `marco@admin.com` / `Admin123@`.
+Essas credenciais são exclusivas da massa de demonstração. Não as utilize em
+produção.
 
-Contas com papel `admin` entram em `/admin`. O painel lista somente metadados e
-contagens agregadas das contas `client`; administradores não recebem acesso às
-transações individuais dos tenants. Suspensões e exclusões são registradas em
-`admin_audit_logs`, e a suspensão incrementa `token_version` para revogar as
-sessões existentes.
+</details>
 
-No detalhe de cada cliente, o administrador pode alterar o nome, redefinir a
-senha, ativar, suspender ou excluir a conta. Todas as ações exigem digitar o
-nome exibido no modal, são confirmadas novamente pelo backend e deixam registro
-de auditoria. O próprio admin altera seu nome e senha em `/admin/configuracoes`.
-
-As operações autenticadas usam `withTenantTransaction` em
-`backend/src/db.ts`. O backend confirma o vínculo do login com o negócio em
-cada requisição e só então define `app.current_business_id` dentro da
-transação, garantindo as políticas de RLS no pool do Neon.
-
-Um OWNER pode administrar até três negócios independentes em `/negocios` e
-alternar entre eles sem refazer o login. Cada negócio pode criar operadores em `/operadores`.
-Operadores têm credenciais próprias e acesso ao catálogo, clientes, caixa e
-vendas da sessão aberta para devoluções confirmadas; as
-configurações, relatórios, backup e gestão da conta permanecem com o OWNER.
-Contas de operador não aparecem como clientes no painel da plataforma.
-
-O caixa oferece impressão ESC/POS/Web Serial, fallback HTML/PDF, gaveta,
-estornos auditados e fila IndexedDB para vendas sem rede. Veja [docs/PDV.md](docs/PDV.md).
-Os rascunhos de Termos e Privacidade, consentimento WhatsApp e anonimização estão
-descritos em [docs/LGPD.md](docs/LGPD.md); os textos exigem revisão jurídica.
-Sentry, logs correlacionados e monitor externo estão em
-[docs/OBSERVABILIDADE.md](docs/OBSERVABILIDADE.md).
-
-## Recuperação de conta
-
-Na tela de login, escolha **Esqueci minha senha** e informe o e-mail da conta.
-O link gerado é válido por 30 minutos e só pode ser usado uma vez. Ao concluir
-a troca, as sessões persistentes anteriores são revogadas.
-
-Em desenvolvimento, a própria API devolve o token e a tela avança diretamente
-para a definição da nova senha. Em produção, configure `FRONTEND_URL`,
-`EMAIL_WEBHOOK_URL`, `EMAIL_WEBHOOK_TOKEN` e `EMAIL_FROM`. O webhook recebe
-`{ from, to, subject, text, html? }` e deve encaminhar a mensagem pelo provedor
-escolhido. Nunca habilite a devolução do token com `NODE_ENV=production`.
-
-Antes de publicar esta versão, aplique o schema para criar os campos de
-revogação de sessão:
+Para apagar todo o conteúdo do banco configurado e recriar a massa:
 
 ```bash
-npm run db:schema
+npm run db:seed -- --reset
 ```
 
-## Validação
+Esse comando é destrutivo e deve ser usado somente em um banco de
+desenvolvimento ou demonstração.
+
+## Comandos úteis
+
+| Comando | Finalidade |
+| --- | --- |
+| `npm run dev` | Inicia frontend e backend |
+| `npm run build` | Gera os builds de produção |
+| `npm run lint` | Valida TypeScript e ESLint |
+| `npm test` | Executa os testes automatizados |
+| `npm run db:schema` | Aplica as migrations SQL |
+| `npm run db:seed` | Cria ou atualiza os dados de demonstração |
+| `npm run prisma:validate --workspace backend` | Valida o schema Prisma |
+
+O CI executa instalação limpa, validação do Prisma, lint, build e testes em cada
+push para `main` e em pull requests.
+
+## Segurança e privacidade
+
+- Senhas são armazenadas com hash e sessões persistentes podem ser revogadas.
+- Rotas sensíveis têm limite de requisições, respostas de autenticação sem cache
+  e cabeçalhos de segurança.
+- IDs fornecidos pelo cliente não definem diretamente o tenant da conexão.
+- Chaves estrangeiras compostas e RLS ajudam a impedir referências entre
+  negócios.
+- Logs e eventos de observabilidade usam campos permitidos e excluem corpos,
+  cookies, tokens, e-mails, telefones e mensagens.
+- Backups lógicos pertencem ao negócio ativo e são validados antes da
+  restauração atômica.
+
+Os Termos de Uso e a Política de Privacidade incluídos no projeto são rascunhos
+técnicos e precisam de revisão jurídica antes de uma publicação comercial.
+
+## Validação antes do deploy
 
 ```bash
+npm ci
+npm run prisma:validate --workspace backend
 npm run lint
 npm test
 npm run build
-npm run prisma:validate --workspace backend
 ```
 
-Não há configuração de Docker local. O banco é remoto e gerenciado pelo fluxo
-Prisma + Neon.
+Para hospedar frontend e API em origens diferentes:
 
-## Hospedagem separada
+1. publique o backend Node e inicie-o com `npm start --workspace backend`;
+2. configure `CORS_ORIGIN` e `FRONTEND_URL` com a URL HTTPS do frontend;
+3. configure `REFRESH_COOKIE_SAME_SITE=none`;
+4. gere o frontend com `VITE_API_URL=https://sua-api.example/api`;
+5. aplique `npm run db:schema` durante o release;
+6. confirme `/api/health`, CORS, cookie, recuperação de senha e um ciclo de
+   exportação e restauração em uma conta de teste.
 
-Frontend e backend não dependem de execução no mesmo servidor:
+Se a plataforma aplicar migrations na inicialização, use
+`RUN_DB_MIGRATIONS_ON_STARTUP=true` apenas quando houver uma única instância
+responsável por essa etapa.
 
-1. publique `backend/` como serviço Node, execute `npm run build --workspace backend`
-   na raiz e inicie com `npm start --workspace backend`;
-2. defina no backend `CORS_ORIGIN=https://seu-front.example`,
-   `FRONTEND_URL=https://seu-front.example` e `REFRESH_COOKIE_SAME_SITE=none`;
-3. gere o frontend com `VITE_API_URL=https://sua-api.example/api`;
-4. mantenha HTTPS nas duas origens, exigido pelo cookie `SameSite=None; Secure`;
-5. aplique `npm run db:schema` no deploy ou habilite
-   `RUN_DB_MIGRATIONS_ON_STARTUP=true` quando a plataforma garantir apenas uma
-   instância executando a migração.
+## Documentação
+
+- [Auditoria técnica atual](docs/AUDITORIA.md)
+- [PDV físico e operação offline](docs/PDV.md)
+- [Privacidade e LGPD](docs/LGPD.md)
+- [Observabilidade e disponibilidade](docs/OBSERVABILIDADE.md)
+- [Relatório da central de ajuda](docs/RELATORIO_CENTRAL_DE_AJUDA.md)
+
+## Estrutura do repositório
+
+```text
+caixafacil/
+├── .github/workflows/   # CI e monitor de disponibilidade
+├── backend/
+│   ├── prisma/          # Schema, migrations e seed
+│   ├── src/             # API, autenticação e regras de negócio
+│   └── tests/           # Testes do backend
+├── docs/                # Documentação operacional e auditoria
+├── frontend/
+│   ├── public/          # Ícones e arquivos públicos
+│   └── src/             # Páginas, componentes, contextos e bibliotecas
+├── package.json         # Scripts e workspaces do monorepo
+└── package-lock.json
+```
 
 ## Suporte
 
-A página pública `/suporte` pode ser acessada antes do login. Usuários com
-sessão também encontram **Falar com o suporte** em Configurações. O formulário
-usa o mesmo adaptador de e-mail da recuperação de conta, tem limite por IP e
-encaminha a resposta para o endereço configurado em `SUPPORT_EMAIL`.
-
-Defina também `VITE_SUPPORT_EMAIL` no frontend para exibir um link direto de
-e-mail caso o provedor esteja temporariamente indisponível.
-
-A API expõe `GET /api/health` para health checks e só responde `200` quando
-também consegue consultar o PostgreSQL. O frontend é um build estático e não
-precisa acessar diretamente o banco.
+A rota pública `/suporte` funciona antes do login. Usuários autenticados também
+encontram o atendimento em **Configurações**. O envio depende de
+`EMAIL_WEBHOOK_URL`, `EMAIL_WEBHOOK_TOKEN`, `EMAIL_FROM` e `SUPPORT_EMAIL`; o
+frontend pode exibir `VITE_SUPPORT_EMAIL` como alternativa.
