@@ -1,12 +1,23 @@
 import type { AppData } from '../types';
 
+/** Chave legada, mantida apenas para remover tokens gravados por versões antigas. */
 export const TOKEN_KEY = 'mnb-auth-token';
+let accessTokenInMemory: string | null = null;
+
+function removeLegacyStoredToken() {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // A sessão HTTP-only continua funcionando quando o armazenamento é bloqueado.
+  }
+}
 
 export type TokenPayload = {
   sub: string;
   email: string;
   iat: number;
   exp: number;
+  role: 'client' | 'admin';
 };
 
 export function decodeToken(token: string): TokenPayload | null {
@@ -26,15 +37,20 @@ export function isTokenValid(token: string | null): token is string {
 }
 
 export function getStoredToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  // O refresh token HTTP-only restaura a sessão após recarregar a página.
+  // O access token não precisa ficar acessível em armazenamento persistente.
+  removeLegacyStoredToken();
+  return accessTokenInMemory;
 }
 
 export function setStoredToken(token: string) {
-  localStorage.setItem(TOKEN_KEY, token);
+  accessTokenInMemory = token;
+  removeLegacyStoredToken();
 }
 
 export function clearStoredToken() {
-  localStorage.removeItem(TOKEN_KEY);
+  accessTokenInMemory = null;
+  removeLegacyStoredToken();
 }
 
 let refreshInFlight: Promise<AuthResponse> | null = null;
@@ -62,10 +78,16 @@ const API_URL = import.meta.env.VITE_API_URL ?? '/api';
 
 export type AuthResponse = {
   token: string;
-  user: { id: string; email: string };
+  user: { id: string; email: string; role: 'client' | 'admin' };
   data?: AppData | null;
 };
 export type SessionResponse = Omit<AuthResponse, 'token'>;
+export type AccountBackup = {
+  format: 'caixafacil-postgres-backup';
+  version: 2;
+  exportedAt: string;
+  tables: Record<string, unknown[]>;
+};
 
 async function parseJsonOrThrow(res: Response) {
   const body = await res.json().catch(() => null);
@@ -155,6 +177,30 @@ export async function resetAccountDataRequest(token: string): Promise<void> {
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.error ?? 'Não foi possível zerar os dados da conta.');
+  }
+}
+
+export async function exportAccountBackupRequest(token: string): Promise<AccountBackup> {
+  const res = await fetch(`${API_URL}/account/backup`, {
+    credentials: 'include',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return parseJsonOrThrow(res);
+}
+
+export async function restoreAccountBackupRequest(token: string, backup: AccountBackup): Promise<void> {
+  const res = await fetch(`${API_URL}/account/backup`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(backup),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? 'Não foi possível restaurar o backup.');
   }
 }
 

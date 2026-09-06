@@ -32,6 +32,7 @@ import { formatCurrency, parseMoney, sanitizeIntegerInput, sanitizeMoneyInput, t
 import { TIPOS_DESPESA } from '../types';
 import type { FormaPagamento, LancamentoManual, TipoDespesa, TipoEntrada, Venda } from '../types';
 import { obterMovimentacoesFinanceiras } from '../lib/movements';
+import { defaultEntryType, entryTypeOptionsForOffer } from '../lib/offering';
 import type { LayoutOutletContext } from '../components/Layout';
 
 const diaSemanaCurto = new Intl.DateTimeFormat('pt-BR', { weekday: 'short' });
@@ -70,6 +71,9 @@ export default function Dashboard() {
     editarLancamentoManual,
     removerLancamentoManual,
   } = useAppData();
+  const oferta = data.config?.oferta ?? 'ambos';
+  const opcoesTipoEntrada = entryTypeOptionsForOffer(oferta);
+  const tipoEntradaPadrao = defaultEntryType(oferta);
 
   const [lancamentoModalAberto, setLancamentoModalAberto] = useState(false);
   const [lancamentoTipo, setLancamentoTipo] = useState<'entrada' | 'saida'>('entrada');
@@ -77,7 +81,7 @@ export default function Dashboard() {
   const [lancamentoValor, setLancamentoValor] = useState('');
   const [lancamentoCategoria, setLancamentoCategoria] = useState<TipoDespesa | ''>('');
   const [lancamentoPagamento, setLancamentoPagamento] = useState<FormaPagamentoLancamento>('dinheiro');
-  const [lancamentoTipoEntrada, setLancamentoTipoEntrada] = useState<TipoEntrada>('produto');
+  const [lancamentoTipoEntrada, setLancamentoTipoEntrada] = useState<TipoEntrada>(tipoEntradaPadrao);
   const [lancamentoSalvando, setLancamentoSalvando] = useState(false);
   const [lancamentoErro, setLancamentoErro] = useState<string | null>(null);
   const [vendaEditando, setVendaEditando] = useState<Venda | null>(null);
@@ -87,6 +91,11 @@ export default function Dashboard() {
   const controlaEstoque = data.config?.controlaEstoque ?? true;
   const viewPeriod = data.config?.viewPeriod ?? 'day';
   const sufixoPeriodo = viewPeriod === 'day' ? 'Hoje' : '(7 dias)';
+  const lancamentoTipoEntradaEfetivo = opcoesTipoEntrada.some(
+    (opcao) => opcao.valor === lancamentoTipoEntrada,
+  )
+    ? lancamentoTipoEntrada
+    : tipoEntradaPadrao;
 
   const metaDiaria = data.config?.metaDiariaVendas ?? 0;
   const progressoMeta = metaDiaria > 0 ? Math.min(100, Math.round((vendasHoje / metaDiaria) * 100)) : 0;
@@ -117,7 +126,7 @@ export default function Dashboard() {
         descricao,
         valor,
         formaPagamento: lancamentoPagamento,
-        tipoEntrada: lancamentoTipo === 'entrada' ? lancamentoTipoEntrada : undefined,
+        tipoEntrada: lancamentoTipo === 'entrada' ? lancamentoTipoEntradaEfetivo : undefined,
         tipoDespesa: lancamentoTipo === 'saida' ? lancamentoCategoria || undefined : undefined,
         movimentoCaixa: 'regular',
       });
@@ -127,7 +136,7 @@ export default function Dashboard() {
       setLancamentoValor('');
       setLancamentoCategoria('');
       setLancamentoPagamento('dinheiro');
-      setLancamentoTipoEntrada('produto');
+      setLancamentoTipoEntrada(tipoEntradaPadrao);
     } catch (error) {
       setLancamentoErro(error instanceof Error ? error.message : 'Não foi possível salvar o lançamento.');
     } finally {
@@ -220,7 +229,7 @@ export default function Dashboard() {
             aria-label={informacoesVisiveis ? 'Ocultar informações' : 'Mostrar informações'}
             title={informacoesVisiveis ? 'Ocultar informações sensíveis' : 'Mostrar informações sensíveis'}
           >
-            {informacoesVisiveis ? <EyeSlash size={18} /> : <Eye size={18} />}
+            {informacoesVisiveis ? <Eye size={18} /> : <EyeSlash size={18} />}
           </button>
         </div>
 
@@ -267,15 +276,17 @@ export default function Dashboard() {
       {/* Ações rápidas */}
       <div
         id="dashboard-action-buttons"
-        className="grid grid-cols-4 gap-2 rounded-2xl border border-line bg-paper-raised p-3 shadow-sm"
+        className="grid grid-cols-3 gap-2 rounded-2xl border border-line bg-paper-raised p-3 shadow-sm"
       >
-        <QuickAction icon={Calculator} label="Caixa" to="/caixa" />
+        <QuickAction icon={Calculator} label="Caixa" tone="caixa" to="/caixa" />
         <QuickAction
           icon={ArrowUpRight}
           label="Entradas"
+          tone="entrada"
           disabled={!data.caixaAtual}
           onClick={() => {
             setLancamentoTipo('entrada');
+            setLancamentoTipoEntrada(tipoEntradaPadrao);
             setLancamentoErro(null);
             setLancamentoModalAberto(true);
           }}
@@ -283,6 +294,7 @@ export default function Dashboard() {
         <QuickAction
           icon={ArrowDownRight}
           label="Despesa"
+          tone="saida"
           disabled={!data.caixaAtual}
           onClick={() => {
             setLancamentoTipo('saida');
@@ -290,12 +302,6 @@ export default function Dashboard() {
             setLancamentoErro(null);
             setLancamentoModalAberto(true);
           }}
-        />
-        <QuickAction
-          icon={HandCoins}
-          label="Suprimento"
-          badge="Em breve"
-          disabled
         />
       </div>
 
@@ -322,15 +328,15 @@ export default function Dashboard() {
         <div
           data-selected={lancamentoTipo}
           data-choice-position={lancamentoTipo === 'saida' ? 'second' : 'first'}
-          className="sliding-choice entry-exit-choice mb-6 grid grid-cols-2 rounded-xl bg-line/40 p-1"
+          className="segmented-slider segmented-slider-2 entry-exit-selector mb-6 grid grid-cols-2 rounded-xl border border-line bg-line/40 p-1"
         >
           <button
             type="button"
-            data-selected={lancamentoTipo === 'entrada'}
+            aria-pressed={lancamentoTipo === 'entrada'}
             onClick={() => {
               setLancamentoTipo('entrada');
             }}
-            className={`choice-option flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold ${
+            className={`selection-option flex items-center justify-center gap-2 rounded-lg border-0 px-3 py-2.5 text-sm font-semibold ${
               lancamentoTipo === 'entrada'
                 ? 'bg-paper-raised text-ledger-strong shadow-sm dark:text-ledger'
                 : 'text-ink-soft hover:text-ink'
@@ -340,11 +346,11 @@ export default function Dashboard() {
           </button>
           <button
             type="button"
-            data-selected={lancamentoTipo === 'saida'}
+            aria-pressed={lancamentoTipo === 'saida'}
             onClick={() => {
               setLancamentoTipo('saida');
             }}
-            className={`choice-option flex items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold ${
+            className={`selection-option flex items-center justify-center gap-2 rounded-lg border-0 px-3 py-2.5 text-sm font-semibold ${
               lancamentoTipo === 'saida'
                 ? 'bg-paper-raised text-stamp shadow-sm'
                 : 'text-ink-soft hover:text-ink'
@@ -378,19 +384,16 @@ export default function Dashboard() {
           {lancamentoTipo === 'entrada' && (
             <fieldset>
               <legend className="mb-2 block text-[10px] font-black uppercase text-ink-soft">Tipo de entrada</legend>
-              <div className="grid grid-cols-3 gap-2">
-                {([
-                  ['produto', 'Produto'],
-                  ['servico', 'Serviço'],
-                  ['gorjeta', 'Gorjeta'],
-                ] as const).map(([tipo, label]) => (
+              <div className={`grid gap-2 ${opcoesTipoEntrada.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                {opcoesTipoEntrada.map(({ valor: tipo, label }) => (
                   <button
                     key={tipo}
                     type="button"
-                    aria-pressed={lancamentoTipoEntrada === tipo}
+                    aria-pressed={lancamentoTipoEntradaEfetivo === tipo}
+                    data-tone={tipo}
                     onClick={() => setLancamentoTipoEntrada(tipo)}
-                    className={`choice-option rounded-xl border px-2 py-3 text-xs font-semibold ${
-                      lancamentoTipoEntrada === tipo
+                    className={`selection-option rounded-xl border px-2 py-3 text-xs font-semibold ${
+                      lancamentoTipoEntradaEfetivo === tipo
                         ? 'border-ledger bg-ledger/10 text-ledger-strong ring-2 ring-ledger/15 dark:text-ledger'
                         : 'border-line bg-paper text-ink-soft hover:border-ink-soft hover:text-ink'
                     }`}
@@ -399,7 +402,7 @@ export default function Dashboard() {
                   </button>
                 ))}
               </div>
-              {lancamentoTipoEntrada === 'gorjeta' ? (
+              {lancamentoTipoEntradaEfetivo === 'gorjeta' ? (
                 <p className="mt-2 text-xs text-ledger-strong dark:text-ledger">Entrada direta, sem pendência de identificação.</p>
               ) : (
                 <p className="mt-2 text-xs text-brass">Será marcada como pendente de identificação para o fechamento.</p>
@@ -415,7 +418,15 @@ export default function Dashboard() {
               onChange={(e) => setLancamentoDescricao(e.target.value)}
               type="text"
               required={lancamentoTipo === 'entrada' || !lancamentoCategoria}
-              placeholder={lancamentoTipo === 'entrada' ? 'Ex: Venda de Produtos' : 'Ex: Conta de luz ou fornecimento'}
+              placeholder={
+                lancamentoTipo === 'entrada'
+                  ? lancamentoTipoEntradaEfetivo === 'servico'
+                    ? 'Ex: Atendimento realizado'
+                    : lancamentoTipoEntradaEfetivo === 'gorjeta'
+                      ? 'Ex: Gorjeta recebida'
+                      : 'Ex: Venda de produtos'
+                  : 'Ex: Conta de luz ou fornecimento'
+              }
               className="w-full rounded-xl border border-line bg-paper px-4 py-3 text-ink"
             />
           </div>
@@ -453,7 +464,7 @@ export default function Dashboard() {
                     type="button"
                     aria-pressed={selecionado}
                     onClick={() => setLancamentoPagamento(value)}
-                    className={`choice-option relative flex min-w-0 flex-col items-center justify-center gap-2 rounded-xl border px-2 py-3 text-xs font-semibold ${
+                    className={`selection-option relative flex min-w-0 flex-col items-center justify-center gap-2 rounded-xl border px-2 py-3 text-xs font-semibold ${
                       selecionado
                         ? 'border-ledger bg-ledger/10 text-ledger-strong ring-2 ring-ledger/15 dark:text-ledger'
                         : 'border-line bg-paper text-ink-soft hover:border-ink-soft hover:text-ink'
@@ -982,6 +993,7 @@ function QuickAction({
   onClick,
   disabled,
   badge,
+  tone = 'neutro',
 }: {
   icon: typeof Calculator;
   label: string;
@@ -989,27 +1001,45 @@ function QuickAction({
   onClick?: () => void;
   disabled?: boolean;
   badge?: string;
+  tone?: 'caixa' | 'entrada' | 'saida' | 'neutro';
 }) {
+  const toneClasses = {
+    caixa: {
+      icon: 'bg-sky-500/15 text-sky-700 group-hover:bg-white group-hover:text-sky-700 dark:bg-sky-400/15 dark:text-sky-300 dark:group-hover:bg-white dark:group-hover:text-sky-600',
+      action: 'text-sky-700 hover:bg-sky-700 hover:text-white dark:text-sky-300 dark:hover:bg-sky-600 dark:hover:text-white',
+    },
+    entrada: {
+      icon: 'bg-ledger/15 text-ledger-strong group-hover:bg-white group-hover:text-ledger-strong dark:text-ledger dark:group-hover:bg-white dark:group-hover:text-ledger-strong',
+      action: 'text-ledger-strong hover:bg-ledger-strong hover:text-white dark:text-ledger dark:hover:bg-ledger-strong dark:hover:text-white',
+    },
+    saida: {
+      icon: 'bg-stamp/15 text-stamp group-hover:bg-white group-hover:text-stamp dark:group-hover:bg-white dark:group-hover:text-[#a9433a]',
+      action: 'text-stamp hover:bg-stamp hover:text-white dark:hover:bg-[#a9433a] dark:hover:text-white',
+    },
+    neutro: {
+      icon: 'bg-line/30 text-ink-soft/60',
+      action: 'cursor-default text-ink-soft/50',
+    },
+  }[tone];
+
   const content = (
     <>
       <div
-        className={`flex h-9 w-9 items-center justify-center rounded-full ${
-          disabled ? 'bg-line/30' : 'bg-ledger/10 text-ledger-strong dark:text-ledger'
-        }`}
+        className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${disabled ? 'bg-line/30 text-ink-soft/60' : toneClasses.icon}`}
       >
         <Icon size={18} />
       </div>
       <span className="text-[10px] font-medium">{label}</span>
       {badge && (
-        <span className="rounded-full bg-brass/10 px-1.5 py-0.5 font-ledger text-[8px] font-bold uppercase tracking-wide text-brass">
+        <span className="absolute bottom-1.5 rounded-full bg-brass/10 px-1.5 py-0.5 font-ledger text-[8px] font-bold uppercase tracking-wide text-brass">
           {badge}
         </span>
       )}
     </>
   );
 
-  const className = `flex flex-col items-center gap-1 rounded-xl py-1.5 transition ${
-    disabled ? 'cursor-default text-ink-soft/50' : 'text-ink-soft hover:bg-line/40 hover:text-ink'
+  const className = `group relative flex min-h-[86px] w-full flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 transition-colors ${
+    disabled ? 'cursor-default text-ink-soft/50' : toneClasses.action
   }`;
 
   return to ? (

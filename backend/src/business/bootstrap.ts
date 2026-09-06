@@ -1,4 +1,4 @@
-import { withTenantTransaction } from '../config/database.js';
+import { withTenantTransaction } from '../db.js';
 
 type UserIdentity = {
   id: string;
@@ -16,10 +16,24 @@ export async function loadBootstrapData(user: UserIdentity) {
     // Um PoolClient do pg processa uma consulta por vez. Manter a sequência
     // explícita evita sobrepor client.query(), comportamento depreciado no pg 8
     // e que será rejeitado no pg 9.
+    const settingsResult = await client.query(`
+          SELECT business_name, business_category, offering, controls_stock,
+                 daily_sales_goal, report_frequency, report_by_email, report_email,
+                 view_period, onboarding_completed
+          FROM business_settings
+          WHERE user_id = $1
+        `, [user.id]);
     const productsResult = await client.query(`
-          SELECT p.id, p.kind, p.name, p.sale_price, p.cost_price,
+          SELECT p.id, p.kind, p.name, p.barcode, p.sale_price, p.cost_price, p.created_at,
                  p.stock_quantity, p.minimum_quantity, p.service_duration::text,
-                 c.name AS category_name
+                 c.name AS category_name,
+                 COALESCE((
+                   SELECT SUM(si.quantity)
+                   FROM sale_items si
+                   JOIN sales s ON s.user_id = si.user_id AND s.id = si.sale_id
+                   WHERE si.user_id = p.user_id AND si.product_id = p.id
+                     AND s.status = 'completed'
+                 ), 0) AS sold_quantity
           FROM products p
           LEFT JOIN categories c ON c.user_id = p.user_id AND c.id = p.category_id
           WHERE p.user_id = $1 AND p.active
@@ -140,7 +154,7 @@ export async function loadBootstrapData(user: UserIdentity) {
         `, [user.id]);
 
     const hasBusinessData =
-      productsResult.rowCount || categoriesResult.rowCount || salesResult.rowCount || expensesResult.rowCount ||
+      settingsResult.rowCount || productsResult.rowCount || categoriesResult.rowCount || salesResult.rowCount || expensesResult.rowCount ||
       creditsResult.rowCount || manualResult.rowCount || transactionsResult.rowCount || cashResult.rowCount;
     if (!hasBusinessData) return null;
 
@@ -177,8 +191,23 @@ export async function loadBootstrapData(user: UserIdentity) {
       pendenciasIdentificacao: Number(session.pending_count),
     }));
 
+    const settings = settingsResult.rows[0];
     return {
-      config: {
+      config: settings ? {
+        nome: settings.business_name,
+        categoria: settings.business_category,
+        oferta: settings.offering,
+        controlaEstoque: settings.controls_stock,
+        metaDiariaVendas: settings.daily_sales_goal === null ? undefined : Number(settings.daily_sales_goal),
+        despesasFixas: fixedExpenses,
+        relatorio: {
+          frequencia: settings.report_frequency,
+          porEmail: settings.report_by_email,
+          email: settings.report_email ?? undefined,
+        },
+        viewPeriod: settings.view_period,
+        onboardingConcluido: settings.onboarding_completed,
+      } : {
         nome: `${user.name ?? user.email.split('@')[0]} — Demonstração`,
         categoria: 'Alimentação (Mercado, Padaria...)',
         oferta: 'ambos',
@@ -193,12 +222,15 @@ export async function loadBootstrapData(user: UserIdentity) {
         id: product.id,
         type: product.kind,
         nome: product.name,
+        codigoBarras: product.barcode ?? undefined,
         categoria: product.category_name ?? undefined,
         precoVenda: Number(product.sale_price),
         custo: Number(product.cost_price),
         quantidade: product.kind === 'product' ? Number(product.stock_quantity ?? 0) : undefined,
         quantidadeMinima: product.kind === 'product' ? Number(product.minimum_quantity ?? 0) : undefined,
         duracao: product.kind === 'service' ? product.service_duration ?? undefined : undefined,
+        createdAt: new Date(product.created_at).toISOString(),
+        quantidadeVendida: Number(product.sold_quantity),
       })),
       categorias: categoriesResult.rows.map((category) => ({
         id: category.id,

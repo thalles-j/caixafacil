@@ -1,12 +1,25 @@
 import { useMemo, useState, type FormEvent } from 'react';
-import { MagnifyingGlass, Package, Plus, WarningCircle, Wrench, Tag, PencilSimple, Trash } from '@phosphor-icons/react';
+import { ArrowsDownUp, MagnifyingGlass, Package, Plus, WarningCircle, Wrench, Tag, PencilSimple, Trash } from '@phosphor-icons/react';
 import { useAppData } from '../context/AppDataContext';
 import { formatCurrency, parseMoney, sanitizeIntegerInput, sanitizeMoneyInput } from '../lib/format';
 import Modal from '../components/Modal';
+import Pagination from '../components/Pagination';
+import { paginateItems } from '../lib/pagination';
+import { sortCatalogItems, type OrdenacaoCatalogo } from '../lib/catalogSorting';
+import { catalogTypesForOffer, defaultCatalogType } from '../lib/offering';
 import type { CategoriaProduto, Produto } from '../types';
 
 type TipoFiltro = 'todos' | 'product' | 'service';
 type Filtro = 'todos' | 'baixo' | string;
+const OPCOES_ORDENACAO: ReadonlyArray<{ valor: OrdenacaoCatalogo; label: string }> = [
+  { valor: 'recentes', label: 'Adicionados recentemente' },
+  { valor: 'maior-preco', label: 'Maior preço' },
+  { valor: 'menor-preco', label: 'Menor preço' },
+  { valor: 'az', label: 'Ordem alfabética A–Z' },
+  { valor: 'za', label: 'Ordem alfabética Z–A' },
+  { valor: 'mais-vendidos', label: 'Mais vendidos' },
+  { valor: 'menos-vendidos', label: 'Menos vendidos' },
+];
 
 function obterTipoItem(item: Produto): 'product' | 'service' {
   const tipoPersistido = (item as Produto & { type?: unknown }).type;
@@ -25,8 +38,10 @@ export default function Catalogo() {
     removerCategoria,
   } = useAppData();
   const oferta = data.config?.oferta ?? 'ambos';
-  const tipoPadrao = oferta === 'produtos' ? 'product' : oferta === 'servicos' ? 'service' : 'product';
-  const permiteTrocarTipo = oferta === 'ambos';
+  const tiposPermitidos = useMemo(() => catalogTypesForOffer(oferta), [oferta]);
+  const tipoPadrao = defaultCatalogType(oferta);
+  const permiteTrocarTipo = tiposPermitidos.length > 1;
+  const tiposFiltroDisponiveis: TipoFiltro[] = ['todos', ...tiposPermitidos];
 
   const [tipoFiltro, setTipoFiltro] = useState<TipoFiltro>('todos');
   const [filtro, setFiltro] = useState<Filtro>('todos');
@@ -42,35 +57,51 @@ export default function Catalogo() {
   const [nomeCategoriaEditando, setNomeCategoriaEditando] = useState('');
   const [categoriaParaRemover, setCategoriaParaRemover] = useState<CategoriaProduto | null>(null);
   const [categoriaErro, setCategoriaErro] = useState<string | null>(null);
-
-  // ajusta itemType quando tipoPadrao muda (ex: oferta do negócio foi alterada em
-  // outra tela) — setState direto durante o render em vez de useEffect, seguindo
-  // o padrão recomendado pelo React para "adjusting state when a prop changes"
-  const [tipoPadraoAnterior, setTipoPadraoAnterior] = useState(tipoPadrao);
-  if (tipoPadrao !== tipoPadraoAnterior) {
-    setTipoPadraoAnterior(tipoPadrao);
-    setItemType(tipoPadrao);
-  }
+  const [catalogoErro, setCatalogoErro] = useState<string | null>(null);
+  const [salvando, setSalvando] = useState(false);
+  const [pagina, setPagina] = useState(1);
+  const [ordenacao, setOrdenacao] = useState<OrdenacaoCatalogo>('recentes');
+  const itemTypeEfetivo = tiposPermitidos.includes(itemType) ? itemType : tipoPadrao;
+  const tipoFiltroEfetivo = tipoFiltro === 'todos' || tiposPermitidos.includes(tipoFiltro) ? tipoFiltro : 'todos';
+  const filtroEfetivo = filtro === 'baixo' && !tiposPermitidos.includes('product') ? 'todos' : filtro;
 
   const categorias = data.categorias ?? [];
 
+  const vendasPorProduto = useMemo(() => {
+    const totais = new Map<string, number>();
+    data.vendas.forEach((venda) => {
+      if (!venda.produtoId) return;
+      totais.set(venda.produtoId, (totais.get(venda.produtoId) ?? 0) + venda.quantidade);
+    });
+    return totais;
+  }, [data.vendas]);
+
+  const itensPermitidos = useMemo(
+    () => data.produtos.filter((item) => catalogTypesForOffer(oferta).includes(obterTipoItem(item))),
+    [data.produtos, oferta],
+  );
+
   const itensFiltrados = useMemo(() => {
-    return data.produtos.filter((item) => {
+    const filtrados = itensPermitidos.filter((item) => {
       const tipoItem = obterTipoItem(item);
-      if (tipoFiltro === 'product' && tipoItem !== 'product') return false;
-      if (tipoFiltro === 'service' && tipoItem !== 'service') return false;
-      if (filtro === 'baixo') {
+      if (tipoFiltroEfetivo === 'product' && tipoItem !== 'product') return false;
+      if (tipoFiltroEfetivo === 'service' && tipoItem !== 'service') return false;
+      if (filtroEfetivo === 'baixo') {
         return tipoItem === 'product' && (item.quantidade ?? 0) <= (item.quantidadeMinima ?? 0);
       }
-      if (filtro !== 'todos' && item.categoria !== filtro) return false;
+      if (filtroEfetivo !== 'todos' && item.categoria !== filtroEfetivo) return false;
       if (!busca.trim()) return true;
       return item.nome.toLowerCase().includes(busca.trim().toLowerCase());
     });
-  }, [data.produtos, tipoFiltro, filtro, busca]);
+
+    return sortCatalogItems(filtrados, ordenacao, vendasPorProduto);
+  }, [busca, filtroEfetivo, itensPermitidos, ordenacao, tipoFiltroEfetivo, vendasPorProduto]);
+  const itensPaginados = paginateItems(itensFiltrados, pagina);
 
   const abrirNovo = () => {
     setProdutoEditando(null);
     setItemType(tipoPadrao);
+    setCatalogoErro(null);
     setConfirmarRemocaoAberto(false);
     setModalAberto(true);
   };
@@ -78,6 +109,7 @@ export default function Catalogo() {
   const abrirEdicao = (produto: Produto) => {
     setProdutoEditando(produto);
     setItemType(obterTipoItem(produto));
+    setCatalogoErro(null);
     setConfirmarRemocaoAberto(false);
     setModalAberto(true);
   };
@@ -92,20 +124,34 @@ export default function Catalogo() {
     setConfirmarRemocaoAberto(false);
   };
 
-  const confirmarRemocao = () => {
+  const confirmarRemocao = async () => {
     if (!produtoParaRemover) return;
-    removerProduto(produtoParaRemover.id);
-    fecharConfirmarRemocao();
+    setSalvando(true);
+    try {
+      await removerProduto(produtoParaRemover.id);
+      fecharConfirmarRemocao();
+    } catch (error) {
+      setCatalogoErro(error instanceof Error ? error.message : 'Não foi possível excluir o item.');
+    } finally {
+      setSalvando(false);
+    }
   };
 
-  const cadastrarCategoria = (event: FormEvent<HTMLFormElement>) => {
+  const cadastrarCategoria = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!addCategoria(novaCategoria)) {
-      setCategoriaErro('Informe um nome diferente das categorias existentes.');
-      return;
+    setSalvando(true);
+    try {
+      if (!(await addCategoria(novaCategoria))) {
+        setCategoriaErro('Informe um nome diferente das categorias existentes.');
+        return;
+      }
+      setNovaCategoria('');
+      setCategoriaErro(null);
+    } catch (error) {
+      setCategoriaErro(error instanceof Error ? error.message : 'Não foi possível criar a categoria.');
+    } finally {
+      setSalvando(false);
     }
-    setNovaCategoria('');
-    setCategoriaErro(null);
   };
 
   const iniciarEdicaoCategoria = (categoria: CategoriaProduto) => {
@@ -114,27 +160,41 @@ export default function Catalogo() {
     setCategoriaErro(null);
   };
 
-  const salvarEdicaoCategoria = () => {
+  const salvarEdicaoCategoria = async () => {
     if (!categoriaEditando) return;
     const nomeAnterior = categoriaEditando.nome;
-    if (!editarCategoria(categoriaEditando.id, nomeCategoriaEditando)) {
-      setCategoriaErro('Informe um nome diferente das categorias existentes.');
-      return;
+    setSalvando(true);
+    try {
+      if (!(await editarCategoria(categoriaEditando.id, nomeCategoriaEditando))) {
+        setCategoriaErro('Informe um nome diferente das categorias existentes.');
+        return;
+      }
+      if (filtro === nomeAnterior) setFiltro(nomeCategoriaEditando.trim());
+      setCategoriaEditando(null);
+      setNomeCategoriaEditando('');
+      setCategoriaErro(null);
+    } catch (error) {
+      setCategoriaErro(error instanceof Error ? error.message : 'Não foi possível atualizar a categoria.');
+    } finally {
+      setSalvando(false);
     }
-    if (filtro === nomeAnterior) setFiltro(nomeCategoriaEditando.trim());
-    setCategoriaEditando(null);
-    setNomeCategoriaEditando('');
-    setCategoriaErro(null);
   };
 
-  const confirmarRemocaoCategoria = () => {
+  const confirmarRemocaoCategoria = async () => {
     if (!categoriaParaRemover) return;
-    if (filtro === categoriaParaRemover.nome) setFiltro('todos');
-    removerCategoria(categoriaParaRemover.id);
-    setCategoriaParaRemover(null);
+    setSalvando(true);
+    try {
+      await removerCategoria(categoriaParaRemover.id);
+      if (filtro === categoriaParaRemover.nome) setFiltro('todos');
+      setCategoriaParaRemover(null);
+    } catch (error) {
+      setCategoriaErro(error instanceof Error ? error.message : 'Não foi possível excluir a categoria.');
+    } finally {
+      setSalvando(false);
+    }
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const nome = String(form.get('nome') ?? '').trim();
@@ -143,10 +203,17 @@ export default function Catalogo() {
     const custo = custoRaw ? parseMoney(custoRaw) : undefined;
     const categoriaRaw = String(form.get('categoria') ?? '').trim();
     const categoria = categoriaRaw || undefined;
+    const codigoBarras = String(form.get('codigoBarras') ?? '').trim() || undefined;
 
-    if (!nome || precoVenda <= 0) return;
+    if (!nome || precoVenda <= 0) {
+      setCatalogoErro('Informe um nome e um preço de venda válido.');
+      return;
+    }
 
-    if (itemType === 'product') {
+    setSalvando(true);
+    setCatalogoErro(null);
+    try {
+      if (itemTypeEfetivo === 'product') {
       const quantidade = Math.max(0, Number(form.get('quantidade') ?? 0));
       const quantidadeMinima = Math.max(0, Number(form.get('quantidadeMinima') ?? 0));
       const payload: Omit<Produto, 'id'> = {
@@ -154,19 +221,23 @@ export default function Catalogo() {
         nome,
         precoVenda,
         categoria,
+        codigoBarras,
         custo,
         quantidade,
         quantidadeMinima,
       };
 
       if (produtoEditando) {
-        atualizarProduto(produtoEditando.id, payload);
+        await atualizarProduto(produtoEditando.id, payload);
       } else {
-        addProduto(payload);
+        await addProduto(payload);
       }
-    } else {
+      } else {
       const duracao = String(form.get('duracao') ?? '').trim();
-      if (!duracao) return;
+      if (!duracao) {
+        setCatalogoErro('Informe a duração estimada do serviço.');
+        return;
+      }
       const payload: Omit<Produto, 'id'> = {
         type: 'service',
         nome,
@@ -177,14 +248,19 @@ export default function Catalogo() {
       };
 
       if (produtoEditando) {
-        atualizarProduto(produtoEditando.id, payload);
+        await atualizarProduto(produtoEditando.id, payload);
       } else {
-        addProduto(payload);
+        await addProduto(payload);
       }
-    }
+      }
 
-    setModalAberto(false);
-    setProdutoEditando(null);
+      setModalAberto(false);
+      setProdutoEditando(null);
+    } catch (error) {
+      setCatalogoErro(error instanceof Error ? error.message : 'Não foi possível salvar o item.');
+    } finally {
+      setSalvando(false);
+    }
   };
 
   const quantidadeBaixa = (item: Produto) => {
@@ -217,24 +293,46 @@ export default function Catalogo() {
         </div>
       </div>
 
-      <div className="mb-4 grid gap-3 sm:grid-cols-[1fr_auto]">
+      <div className="mb-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_auto_auto]">
         <div className="relative">
           <MagnifyingGlass size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-soft" />
           <input
             value={busca}
-            onChange={(event) => setBusca(event.target.value)}
+            onChange={(event) => {
+              setBusca(event.target.value);
+              setPagina(1);
+            }}
             placeholder="Buscar por nome..."
             className="w-full rounded-2xl border border-line bg-paper-raised px-10 py-3 text-sm text-ink shadow-sm focus:border-ledger focus:outline-none focus:ring-2 focus:ring-ledger/30"
           />
         </div>
+        <label className="flex min-w-0 items-center gap-2 rounded-xl border border-line bg-paper-raised px-3 py-2 text-ink shadow-sm">
+          <ArrowsDownUp size={17} className="shrink-0 text-ink-soft" />
+          <span className="sr-only">Ordenar catálogo</span>
+          <select
+            value={ordenacao}
+            onChange={(event) => {
+              setOrdenacao(event.target.value as OrdenacaoCatalogo);
+              setPagina(1);
+            }}
+            aria-label="Ordenar catálogo"
+            className="catalog-sort-select min-w-0 flex-1 cursor-pointer bg-transparent text-sm font-semibold text-ink outline-none"
+          >
+            {OPCOES_ORDENACAO.map((opcao) => (
+              <option key={opcao.valor} value={opcao.valor}>{opcao.label}</option>
+            ))}
+          </select>
+        </label>
         <div className="flex gap-2">
-          {(['todos', 'product', 'service'] as TipoFiltro[]).map((tipo) => (
+          {tiposFiltroDisponiveis.map((tipo) => (
             <button
               key={tipo}
-              onClick={() => setTipoFiltro(tipo)}
-              data-selected={tipoFiltro === tipo}
-              className={`choice-option rounded-full px-4 py-1.5 text-sm font-medium ${
-                tipoFiltro === tipo ? 'bg-ledger text-paper' : 'border border-line bg-paper-raised text-ink-soft'
+              onClick={() => {
+                setTipoFiltro(tipo);
+                setPagina(1);
+              }}
+              className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
+                tipoFiltroEfetivo === tipo ? 'bg-ledger text-paper' : 'border border-line bg-paper-raised text-ink-soft'
               }`}
             >
               {tipo === 'todos' ? 'Todos' : tipo === 'product' ? 'Produtos' : 'Serviços'}
@@ -245,30 +343,38 @@ export default function Catalogo() {
 
       <div className="scrollbar-hide mb-4 -mx-4 flex gap-2 overflow-x-auto px-4 pb-2">
         <button
-          onClick={() => setFiltro('todos')}
-          data-selected={filtro === 'todos'}
-          className={`choice-option whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium ${
-            filtro === 'todos' ? 'bg-ledger text-paper' : 'border border-line bg-paper-raised text-ink-soft'
+          onClick={() => {
+            setFiltro('todos');
+            setPagina(1);
+          }}
+          className={`whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium transition ${
+            filtroEfetivo === 'todos' ? 'bg-ledger text-paper' : 'border border-line bg-paper-raised text-ink-soft'
           }`}
         >
           Todos
         </button>
-        <button
-          onClick={() => setFiltro('baixo')}
-          data-selected={filtro === 'baixo'}
-          className={`choice-option flex items-center gap-1 whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium ${
-            filtro === 'baixo' ? 'bg-stamp text-paper' : 'border border-line bg-paper-raised text-ink-soft'
-          }`}
-        >
-          <span className="h-2 w-2 rounded-full bg-current" /> Estoque baixo
-        </button>
+        {tiposPermitidos.includes('product') && (
+          <button
+            onClick={() => {
+              setFiltro('baixo');
+              setPagina(1);
+            }}
+            className={`flex items-center gap-1 whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium transition ${
+              filtroEfetivo === 'baixo' ? 'bg-stamp text-paper' : 'border border-line bg-paper-raised text-ink-soft'
+            }`}
+          >
+            <span className="h-2 w-2 rounded-full bg-current" /> Estoque baixo
+          </button>
+        )}
         {categorias.map((cat) => (
           <button
             key={cat.id}
-            onClick={() => setFiltro(cat.nome)}
-            data-selected={filtro === cat.nome}
-            className={`choice-option whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium ${
-              filtro === cat.nome ? 'bg-ledger text-paper' : 'border border-line bg-paper-raised text-ink-soft'
+            onClick={() => {
+              setFiltro(cat.nome);
+              setPagina(1);
+            }}
+            className={`whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-medium transition ${
+              filtroEfetivo === cat.nome ? 'bg-ledger text-paper' : 'border border-line bg-paper-raised text-ink-soft'
             }`}
           >
             {cat.nome}
@@ -277,13 +383,17 @@ export default function Catalogo() {
       </div>
 
       {itensFiltrados.length === 0 ? (
-        data.produtos.length === 0 ? (
+        itensPermitidos.length === 0 ? (
           <div className="flex flex-col items-center rounded-2xl border border-dashed border-line bg-paper-raised p-8 text-center shadow-sm">
             <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-ledger/10 text-ledger-strong dark:text-ledger">
               <Package size={24} />
             </div>
-            <p className="mb-1 text-sm font-medium text-ink">Nenhum item cadastrado ainda.</p>
-            <p className="mb-4 text-xs text-ink-soft">Cadastre produtos ou serviços para começar.</p>
+            <p className="mb-1 text-sm font-medium text-ink">
+              Nenhum {oferta === 'servicos' ? 'serviço' : oferta === 'produtos' ? 'produto' : 'item'} cadastrado ainda.
+            </p>
+            <p className="mb-4 text-xs text-ink-soft">
+              Cadastre {oferta === 'servicos' ? 'serviços' : oferta === 'produtos' ? 'produtos' : 'produtos ou serviços'} para começar.
+            </p>
             <button
               onClick={abrirNovo}
               className="flex items-center gap-2 rounded-lg bg-ledger px-4 py-2 text-sm font-medium text-paper transition hover:bg-ledger-strong"
@@ -299,7 +409,7 @@ export default function Catalogo() {
         )
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {itensFiltrados.map((item) => {
+          {itensPaginados.items.map((item) => {
             const baixo = quantidadeBaixa(item);
             const tipoItem = obterTipoItem(item);
             return (
@@ -365,44 +475,53 @@ export default function Catalogo() {
         </div>
       )}
 
+      <Pagination
+        currentPage={itensPaginados.currentPage}
+        totalItems={itensFiltrados.length}
+        onPageChange={setPagina}
+        itemLabel="itens"
+      />
+
       <Modal open={modalAberto} onClose={() => setModalAberto(false)} title={produtoEditando ? 'Editar item' : 'Novo item'}>
         <form className="space-y-4" onSubmit={handleSubmit}>
           <div>
             <label className="mb-1 block text-xs font-medium text-ink-soft">Tipo</label>
-            <div
-              data-selected={itemType}
-              data-choice-position={itemType === 'service' ? 'second' : 'first'}
-              className="sliding-choice catalog-type-choice grid grid-cols-2 rounded-xl border border-line bg-line/40 p-1"
-            >
-              <button
-                type="button"
-                disabled={!permiteTrocarTipo && tipoPadrao !== 'product'}
-                onClick={() => setItemType('product')}
-                data-selected={itemType === 'product'}
-                className={`choice-option rounded-lg border-0 px-4 py-3 text-sm font-semibold ${
-                  itemType === 'product'
-                    ? 'bg-ledger/10 text-ledger-strong dark:text-ledger'
-                    : 'bg-transparent text-ink-soft hover:text-ink'
-                } ${!permiteTrocarTipo && tipoPadrao !== 'product' ? 'cursor-not-allowed opacity-50' : ''}`}
+            {permiteTrocarTipo ? (
+              <div
+                data-selected={itemTypeEfetivo}
+                data-choice-position={itemTypeEfetivo === 'service' ? 'second' : 'first'}
+                className="segmented-slider segmented-slider-2 catalog-type-selector grid grid-cols-2 rounded-xl border border-line bg-line/40 p-1"
               >
-                Produto
-              </button>
-              <button
-                type="button"
-                disabled={!permiteTrocarTipo && tipoPadrao !== 'service'}
-                onClick={() => setItemType('service')}
-                data-selected={itemType === 'service'}
-                className={`choice-option rounded-lg border-0 px-4 py-3 text-sm font-semibold ${
-                  itemType === 'service'
-                    ? 'bg-ledger/10 text-ledger-strong dark:text-ledger'
-                    : 'bg-transparent text-ink-soft hover:text-ink'
-                } ${!permiteTrocarTipo && tipoPadrao !== 'service' ? 'cursor-not-allowed opacity-50' : ''}`}
-              >
-                Serviço
-              </button>
-            </div>
-            {!permiteTrocarTipo && (
-              <p className="mt-2 text-xs text-ink-soft">O tipo está bloqueado pela configuração do negócio.</p>
+                <button
+                  type="button"
+                  onClick={() => setItemType('product')}
+                  aria-pressed={itemTypeEfetivo === 'product'}
+                  className={`selection-option rounded-lg border-0 px-4 py-3 text-sm font-semibold ${
+                    itemTypeEfetivo === 'product'
+                      ? 'bg-ledger text-paper shadow-sm'
+                      : 'bg-transparent text-ink-soft hover:text-ink'
+                  }`}
+                >
+                  Produto
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setItemType('service')}
+                  aria-pressed={itemTypeEfetivo === 'service'}
+                  className={`selection-option rounded-lg border-0 px-4 py-3 text-sm font-semibold ${
+                    itemTypeEfetivo === 'service'
+                      ? 'bg-brass text-paper shadow-sm'
+                      : 'bg-transparent text-ink-soft hover:text-ink'
+                  }`}
+                >
+                  Serviço
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 rounded-xl border border-line bg-line/40 px-4 py-3 text-sm font-semibold text-ink">
+                {tipoPadrao === 'product' ? <Package size={17} /> : <Wrench size={17} />}
+                {tipoPadrao === 'product' ? 'Produto' : 'Serviço'}
+              </div>
             )}
           </div>
 
@@ -475,8 +594,21 @@ export default function Catalogo() {
             />
           </div>
 
-          {itemType === 'product' ? (
-            <div className="grid gap-3 sm:grid-cols-2">
+          {itemTypeEfetivo === 'product' ? (
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-ink-soft">Código de barras (opcional)</label>
+                <input
+                  name="codigoBarras"
+                  type="text"
+                  inputMode="numeric"
+                  defaultValue={produtoEditando?.codigoBarras}
+                  maxLength={64}
+                  placeholder="Digite ou use um leitor USB/Bluetooth"
+                  className="w-full rounded-lg border border-line bg-paper p-2 text-sm text-ink focus:border-ledger focus:outline-none focus:ring-2 focus:ring-ledger/30"
+                />
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-medium text-ink-soft">Quantidade</label>
                 <input
@@ -505,6 +637,7 @@ export default function Catalogo() {
                   className="w-full rounded-lg border border-line bg-paper p-2 text-sm text-ink focus:border-ledger focus:outline-none focus:ring-2 focus:ring-ledger/30"
                 />
               </div>
+              </div>
             </div>
           ) : (
             <div>
@@ -520,8 +653,9 @@ export default function Catalogo() {
             </div>
           )}
 
-          <button type="submit" className="w-full rounded-lg bg-ledger px-4 py-2 text-sm font-semibold text-paper transition hover:bg-ledger-strong">
-            Salvar
+          {catalogoErro && <p role="alert" className="text-xs font-medium text-stamp">{catalogoErro}</p>}
+          <button disabled={salvando} type="submit" className="w-full rounded-lg bg-ledger px-4 py-2 text-sm font-semibold text-paper transition hover:bg-ledger-strong disabled:cursor-wait disabled:opacity-60">
+            {salvando ? 'Salvando…' : 'Salvar'}
           </button>
         </form>
       </Modal>
@@ -547,6 +681,7 @@ export default function Catalogo() {
             />
             <button
               type="submit"
+              disabled={salvando}
               className="flex shrink-0 items-center gap-1 rounded-lg bg-ledger px-3 py-2 text-sm font-semibold text-paper transition hover:bg-ledger-strong"
             >
               <Plus size={16} /> Criar
@@ -577,7 +712,8 @@ export default function Catalogo() {
                         />
                         <button
                           type="button"
-                          onClick={salvarEdicaoCategoria}
+                          onClick={() => void salvarEdicaoCategoria()}
+                          disabled={salvando}
                           className="rounded-lg bg-ledger px-3 py-2 text-xs font-bold text-paper"
                         >
                           Salvar
@@ -652,7 +788,8 @@ export default function Catalogo() {
             </button>
             <button
               type="button"
-              onClick={confirmarRemocaoCategoria}
+              onClick={() => void confirmarRemocaoCategoria()}
+              disabled={salvando}
               className="flex-1 rounded-lg bg-stamp px-4 py-2.5 text-sm font-bold text-paper transition hover:bg-stamp/90"
             >
               Excluir categoria
@@ -675,7 +812,8 @@ export default function Catalogo() {
               Cancelar
             </button>
             <button
-              onClick={confirmarRemocao}
+              onClick={() => void confirmarRemocao()}
+              disabled={salvando}
               className="flex-1 rounded-lg bg-stamp px-4 py-2 text-sm font-semibold text-paper transition hover:bg-stamp/90"
             >
               Excluir

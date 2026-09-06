@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { TOKEN_KEY } from './auth';
-import { registerSaleRequest, registerTransactionRequest, resolveTransactionIdentificationRequest } from './business';
+import { clearStoredToken, setStoredToken } from './auth';
+import {
+  registerSaleRequest,
+  registerTransactionRequest,
+  reopenCashSessionRequest,
+  resolveTransactionIdentificationRequest,
+} from './business';
 
 function fakeToken(): string {
   const encode = (value: object) =>
@@ -24,7 +29,8 @@ describe('requisições financeiras', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     localStorage.clear();
-    localStorage.setItem(TOKEN_KEY, fakeToken());
+    clearStoredToken();
+    setStoredToken(fakeToken());
   });
 
   it('nunca vincula cliente a uma venda comum, mesmo que um id seja informado por engano', async () => {
@@ -96,5 +102,52 @@ describe('requisições financeiras', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ expenseKind: 'mercadoria' });
     expect(fetchMock.mock.calls[1]?.[0]).toContain('/transactions/transaction-1/identification');
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ classification: 'fornecedor' });
+  });
+
+  it('envia o item concreto do catálogo ao resolver uma entrada pendente', async () => {
+    const fetchMock = mockSuccess();
+
+    await resolveTransactionIdentificationRequest('transaction-2', 'servico', 'servico-1');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('/transactions/transaction-2/identification');
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      classification: 'servico',
+      productId: 'servico-1',
+    });
+  });
+
+  it('envia a quantidade de produtos para baixa no estoque', async () => {
+    const fetchMock = mockSuccess();
+
+    await resolveTransactionIdentificationRequest('transaction-3', 'produto', 'produto-1', 3);
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      classification: 'produto',
+      productId: 'produto-1',
+      quantity: 3,
+    });
+  });
+
+  it('envia o valor corrigido somente após a revisão da pendência', async () => {
+    const fetchMock = mockSuccess();
+
+    await resolveTransactionIdentificationRequest('transaction-4', 'produto', 'produto-1', 3, 36);
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      classification: 'produto',
+      productId: 'produto-1',
+      quantity: 3,
+      correctedAmount: 36,
+    });
+  });
+
+  it('exige confirmação explícita ao solicitar a correção do último fechamento', async () => {
+    const fetchMock = mockSuccess();
+
+    await reopenCashSessionRequest('caixa-1');
+
+    expect(fetchMock.mock.calls[0]?.[0]).toContain('/cash-sessions/caixa-1/reopen');
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe('POST');
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ confirm: true });
   });
 });

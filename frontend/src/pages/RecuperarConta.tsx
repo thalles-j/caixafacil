@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle, EnvelopeSimple, Key } from '@phosphor-icons/react';
+import { ArrowLeft, CheckCircle, EnvelopeSimple, Headset, Key } from '@phosphor-icons/react';
 import { forgotPasswordRequest, resetPasswordRequest } from '../lib/auth';
+import { PASSWORD_HINT, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, passwordPolicyError } from '../lib/passwordPolicy';
 
 export default function RecuperarConta() {
   const [searchParams] = useSearchParams();
@@ -13,6 +14,13 @@ export default function RecuperarConta() {
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [concluido, setConcluido] = useState(false);
+
+  useEffect(() => {
+    if (!searchParams.has('token')) return;
+    // O token continua no estado do formulário, mas sai da barra de endereço
+    // para não permanecer no histórico nem vazar por cópia acidental da URL.
+    window.history.replaceState(window.history.state, '', window.location.pathname);
+  }, [searchParams]);
 
   const solicitarRecuperacao = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -33,6 +41,15 @@ export default function RecuperarConta() {
   const alterarSenha = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setErro(null);
+    const senhaInvalida = passwordPolicyError(senha);
+    if (senhaInvalida) {
+      setErro(senhaInvalida);
+      return;
+    }
+    if (senha !== confirmarSenha) {
+      setErro('As senhas não coincidem.');
+      return;
+    }
     setEnviando(true);
     try {
       const resposta = await resetPasswordRequest(token, senha, confirmarSenha);
@@ -64,7 +81,7 @@ export default function RecuperarConta() {
             {concluido
               ? 'Sua conta está pronta para ser acessada novamente.'
               : token
-                ? 'Use pelo menos seis caracteres para proteger sua conta.'
+                ? 'Use 7 caracteres ou mais, incluindo uma letra maiúscula e um caractere especial.'
                 : 'Informe seu e-mail para iniciar a recuperação.'}
           </p>
         </div>
@@ -83,11 +100,12 @@ export default function RecuperarConta() {
               <input
                 type="password"
                 required
-                minLength={6}
+                minLength={PASSWORD_MIN_LENGTH}
+                maxLength={PASSWORD_MAX_LENGTH}
                 autoComplete="new-password"
                 value={senha}
                 onChange={(event) => setSenha(event.target.value)}
-                placeholder="Mínimo de 6 caracteres"
+                placeholder={PASSWORD_HINT}
                 className="w-full rounded-lg border border-line bg-paper p-2.5 text-sm text-ink focus:border-ledger focus:outline-none focus:ring-2 focus:ring-ledger/30"
               />
             </div>
@@ -96,7 +114,8 @@ export default function RecuperarConta() {
               <input
                 type="password"
                 required
-                minLength={6}
+                minLength={PASSWORD_MIN_LENGTH}
+                maxLength={PASSWORD_MAX_LENGTH}
                 autoComplete="new-password"
                 value={confirmarSenha}
                 onChange={(event) => setConfirmarSenha(event.target.value)}
@@ -120,6 +139,7 @@ export default function RecuperarConta() {
               <input
                 type="email"
                 required
+                maxLength={254}
                 autoComplete="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
@@ -139,6 +159,9 @@ export default function RecuperarConta() {
           </form>
         )}
       </div>
+      <Link to="/suporte" className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-ink-soft transition hover:text-ink">
+        <Headset size={17} /> Não conseguiu recuperar? Fale com o suporte
+      </Link>
     </div>
   );
 }

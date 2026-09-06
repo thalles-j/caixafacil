@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Storefront, UserPlus } from '@phosphor-icons/react';
+import { ArrowLeft, Headset, Storefront, UserPlus } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
+import { PASSWORD_HINT, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, passwordPolicyError } from '../lib/passwordPolicy';
 
 export default function Cadastro() {
   const navigate = useNavigate();
@@ -14,6 +15,11 @@ export default function Cadastro() {
 
   const criarConta = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    const senhaInvalida = passwordPolicyError(senha);
+    if (senhaInvalida) {
+      setErro(senhaInvalida);
+      return;
+    }
     if (senha !== confirmaSenha) {
       setErro('As senhas não coincidem.');
       return;
@@ -53,6 +59,7 @@ export default function Cadastro() {
             <input
               type="email"
               required
+              maxLength={254}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="voce@seunegocio.com"
@@ -64,10 +71,11 @@ export default function Cadastro() {
             <input
               type="password"
               required
-              minLength={6}
+              minLength={PASSWORD_MIN_LENGTH}
+              maxLength={PASSWORD_MAX_LENGTH}
               value={senha}
               onChange={(e) => setSenha(e.target.value)}
-              placeholder="••••••••"
+              placeholder={PASSWORD_HINT}
               className="w-full rounded-lg border border-line bg-paper p-2.5 text-sm text-ink focus:border-ledger focus:outline-none focus:ring-2 focus:ring-ledger/30"
             />
           </div>
@@ -76,7 +84,8 @@ export default function Cadastro() {
             <input
               type="password"
               required
-              minLength={6}
+              minLength={PASSWORD_MIN_LENGTH}
+              maxLength={PASSWORD_MAX_LENGTH}
               value={confirmaSenha}
               onChange={(e) => setConfirmaSenha(e.target.value)}
               placeholder="••••••••"
@@ -102,6 +111,9 @@ export default function Cadastro() {
           </Link>
         </p>
       </div>
+      <Link to="/suporte" className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-ink-soft transition hover:text-ink">
+        <Headset size={17} /> Precisa de ajuda? Fale com o suporte
+      </Link>
     </div>
   );
 }

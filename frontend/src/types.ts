@@ -75,8 +75,11 @@ export interface TransacaoFinanceira {
 
 export interface Produto {
   id: string;
+  createdAt?: string;
+  quantidadeVendida?: number;
   type: 'product' | 'service';
   nome: string;
+  codigoBarras?: string;
   categoria?: string; // tag livre, ex: "Bebidas", "Doces" — usada nos filtros da tela de Catálogo
   precoVenda: number;
   custo?: number; // opcional, para cálculo de margem futuro

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildWhatsAppChargeUrl, normalizeWhatsAppPhone } from './whatsapp';
+import { buildWhatsAppChargeUrl, normalizeWhatsAppPhone, whatsappChargeUrl } from './whatsapp';
 
 describe('cobrança por WhatsApp', () => {
   it('normaliza um celular brasileiro e adiciona o código do país', () => {
@@ -29,5 +29,19 @@ describe('cobrança por WhatsApp', () => {
     expect(parsed.searchParams.get('text')).toContain('R$ 42,50');
     expect(parsed.searchParams.get('text')).toContain('Venda fiado');
     expect(parsed.searchParams.get('text')).toContain('10/08/2026');
+  });
+});
+
+
+describe('whatsappChargeUrl', () => {
+  it('normaliza um celular brasileiro e inclui nome e valor na cobrança', () => {
+    const url = whatsappChargeUrl('(11) 99999-1234', 'Ana', 12.5);
+    expect(url).toContain('https://wa.me/5511999991234?text=');
+    expect(decodeURIComponent(url ?? '')).toContain('Ana');
+    expect(decodeURIComponent(url ?? '')).toContain('R$ 12,50');
+  });
+
+  it('não cria link para telefone inválido', () => {
+    expect(whatsappChargeUrl('123', 'Ana', 10)).toBeNull();
   });
 });

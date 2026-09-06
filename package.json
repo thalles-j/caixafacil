@@ -2,29 +2,23 @@
   "name": "caixafacil",
   "private": true,
   "version": "0.1.0",
+  "type": "module",
   "workspaces": [
     "frontend",
     "backend"
   ],
   "scripts": {
-    "dev": "concurrently --kill-others-on-fail --names BACKEND,FRONTEND --prefix-colors magenta,cyan --prefix \"[{name}]\" \"npm run dev:backend\" \"wait-on --timeout 30000 http-get://127.0.0.1:3000/api/health && npm run dev:frontend\"",
+    "install:all": "npm install --workspaces",
+    "dev": "concurrently --kill-others-on-fail --names FRONTEND,BACKEND --prefix-colors cyan,magenta --prefix \"[{name}]\" \"npm run dev --workspace frontend\" \"npm run dev --workspace backend\"",
     "dev:frontend": "npm run dev --workspace frontend",
     "dev:backend": "npm run dev --workspace backend",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "prisma:generate": "npm run prisma:generate --workspace backend",
-    "prisma:validate": "npm run prisma:validate --workspace backend",
-    "prisma:migrate": "npm run prisma:migrate --workspace backend",
-    "prisma:deploy": "npm run prisma:deploy --workspace backend",
-    "seed": "npm run seed --workspace backend",
-    "seed:reset": "npm run seed --workspace backend -- --reset"
+    "db:schema": "npm run db:schema --workspace backend",
+    "db:seed": "npm run seed --workspace backend --"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1",
-    "wait-on": "^8.0.4"
-  },
-  "engines": {
-    "node": ">=22.12.0"
+    "concurrently": "^9.2.1"
   }
 }

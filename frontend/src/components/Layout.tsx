@@ -8,6 +8,7 @@ import { useDarkMode } from '../lib/theme';
 import type { Conta } from '../types';
 import BottomNav from './BottomNav';
 import FabButton from './FabButton';
+import HelpCenter from './HelpCenter';
 
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', {
   weekday: 'long',
@@ -96,6 +97,7 @@ export default function Layout() {
               >
                 {dark ? <Sun size={20} /> : <Moon size={20} />}
               </button>
+              <HelpCenter />
               <button
                 onClick={() => navigate('/configuracoes')}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-full text-ink-soft transition hover:bg-line/50 hover:text-ink"

@@ -1,7 +1,16 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { changePasswordRequest, decodeToken, ensureStoredAccessToken, isTokenValid, TOKEN_KEY } from './auth';
+import {
+  changePasswordRequest,
+  clearStoredToken,
+  decodeToken,
+  ensureStoredAccessToken,
+  getStoredToken,
+  isTokenValid,
+  setStoredToken,
+  TOKEN_KEY,
+} from './auth';
 
 function fakeToken(payload: Record<string, unknown>): string {
   const base64url = (obj: object) =>
@@ -23,6 +32,7 @@ describe('decodeToken', () => {
 describe('isTokenValid', () => {
   beforeEach(() => {
     localStorage.clear();
+    clearStoredToken();
     vi.restoreAllMocks();
   });
   it('retorna false para token nulo', () => {
@@ -53,7 +63,7 @@ describe('isTokenValid', () => {
       iat: 0,
       exp: Math.floor(Date.now() / 1000) + 3600,
     });
-    localStorage.setItem(TOKEN_KEY, expirado);
+    setStoredToken(expirado);
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({
         token: renovado,
@@ -63,7 +73,8 @@ describe('isTokenValid', () => {
     );
 
     await expect(ensureStoredAccessToken()).resolves.toBe(renovado);
-    expect(localStorage.getItem(TOKEN_KEY)).toBe(renovado);
+    expect(getStoredToken()).toBe(renovado);
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(fetchMock).toHaveBeenCalledWith('/api/auth/refresh', {
       method: 'POST',
       credentials: 'include',

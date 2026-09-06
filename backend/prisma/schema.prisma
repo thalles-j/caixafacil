@@ -1,247 +1,227 @@
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
-  extensions = [citext, pgcrypto]
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
-model User {
-  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email               String               @unique @db.Citext
-  passwordHash        String               @map("password_hash")
-  name                String?
-  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime             @default(now()) @map("updated_at") @db.Timestamptz(6)
-  passwordResetTokens PasswordResetToken[]
-  categories          Category[]
-  products            Product[]
-  customers           Customer[]
-  cashSessions        CashSession[]
-  sales               Sale[]
-  saleItems           SaleItem[]
-  fixedExpenses       FixedExpense[]
-  creditSales         CreditSale[]
-  transactions        Transaction[]
+// RLS, triggers, views, constraints parciais e extensoes do Neon/Postgres
+// permanecem na migration SQL, pois nao possuem representacao completa no DSL.
 
-  @@map("users")
+model users {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String   @unique @db.Citext
+  password_hash String
+  token_version Int      @default(0)
+  role          String   @default("client")
+  status        String   @default("active")
+  name          String?
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime @default(now()) @db.Timestamptz(6)
 }
 
-model PasswordResetToken {
-  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String    @map("user_id") @db.Uuid
-  tokenHash String    @unique @map("token_hash")
-  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
-  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+model admin_audit_logs {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  admin_user_id String?  @db.Uuid
+  target_user_id String  @db.Uuid
+  action        String
+  details       Json     @default("{}")
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
 
-  @@index([userId, createdAt(sort: Desc)], map: "idx_password_reset_tokens_user_created")
-  @@map("password_reset_tokens")
+  @@index([admin_user_id, created_at(sort: Desc)], map: "idx_admin_audit_admin_created")
+  @@index([target_user_id, created_at(sort: Desc)], map: "idx_admin_audit_target_created")
 }
 
-model Category {
-  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String    @map("user_id") @db.Uuid
-  name      String
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  products  Product[]
+model password_reset_tokens {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String    @db.Uuid
+  token_hash String    @unique
+  expires_at DateTime  @db.Timestamptz(6)
+  used_at    DateTime? @db.Timestamptz(6)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
 
-  @@unique([userId, id], map: "uq_categories_tenant_id")
-  @@map("categories")
+  @@index([user_id, created_at(sort: Desc)], map: "idx_password_reset_tokens_user_created")
 }
 
-model Product {
-  id               String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId           String                  @map("user_id") @db.Uuid
-  categoryId       String?                 @map("category_id") @db.Uuid
-  kind             String                  @default("product")
+model business_settings {
+  user_id              String   @id @db.Uuid
+  business_name        String
+  business_category    String
+  offering             String   @default("ambos")
+  controls_stock       Boolean  @default(true)
+  daily_sales_goal     Decimal? @db.Decimal(14, 2)
+  report_frequency     String   @default("nenhum")
+  report_by_email      Boolean  @default(false)
+  report_email         String?  @db.Citext
+  view_period          String   @default("day")
+  onboarding_completed Boolean  @default(false)
+  created_at           DateTime @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime @default(now()) @db.Timestamptz(6)
+}
+
+model categories {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String   @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  name       String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([user_id, id], map: "uq_categories_tenant_id")
+}
+
+model products {
+  id               String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id          String                   @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  category_id      String?                  @db.Uuid
+  kind             String                   @default("product")
   name             String
-  salePrice        Decimal                 @default(0) @map("sale_price") @db.Decimal(14, 2)
-  costPrice        Decimal                 @default(0) @map("cost_price") @db.Decimal(14, 2)
-  stockQuantity    Decimal?                @map("stock_quantity") @db.Decimal(14, 3)
-  minimumQuantity  Decimal?                @map("minimum_quantity") @db.Decimal(14, 3)
-  serviceDuration  Unsupported("interval")? @map("service_duration")
-  active           Boolean                 @default(true)
-  createdAt        DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
-  user             User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  category         Category?               @relation(fields: [userId, categoryId], references: [userId, id], onDelete: Restrict)
-  saleItems        SaleItem[]
+  barcode          String?
+  sale_price       Decimal                  @default(0) @db.Decimal(14, 2)
+  cost_price       Decimal                  @default(0) @db.Decimal(14, 2)
+  stock_quantity   Decimal?                 @db.Decimal(14, 3)
+  minimum_quantity Decimal?                 @db.Decimal(14, 3)
+  service_duration Unsupported("interval")?
+  active           Boolean                  @default(true)
+  created_at       DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime                 @default(now()) @db.Timestamptz(6)
 
-  @@unique([userId, id], map: "uq_products_tenant_id")
-  @@index([userId, active], map: "idx_products_user_active")
-  @@index([userId, categoryId], map: "idx_products_user_category")
-  @@map("products")
+  @@unique([user_id, id], map: "uq_products_tenant_id")
+  @@index([user_id, active], map: "idx_products_user_active")
+  @@index([user_id, category_id], map: "idx_products_user_category")
+  @@unique([user_id, barcode], map: "uq_products_user_barcode")
 }
 
-model Customer {
-  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId      String       @map("user_id") @db.Uuid
-  name        String
-  phone       String?
-  email       String?      @db.Citext
-  notes       String?
-  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sales       Sale[]
-  creditSales CreditSale[]
+model customers {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String   @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  name       String
+  phone      String?
+  email      String?  @db.Citext
+  notes      String?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
 
-  @@unique([userId, id], map: "uq_customers_tenant_id")
-  @@map("customers")
+  @@unique([user_id, id], map: "uq_customers_tenant_id")
 }
 
-model CashSession {
-  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId          String        @map("user_id") @db.Uuid
-  responsible     String
-  openedAt        DateTime      @default(now()) @map("opened_at") @db.Timestamptz(6)
-  closedAt        DateTime?     @map("closed_at") @db.Timestamptz(6)
-  openingBalance  Decimal       @default(0) @map("opening_balance") @db.Decimal(14, 2)
-  closingBalance  Decimal?      @map("closing_balance") @db.Decimal(14, 2)
-  expectedBalance Decimal?      @map("expected_balance") @db.Decimal(14, 2)
-  difference      Decimal?      @default(dbgenerated()) @db.Decimal(14, 2)
-  status          String        @default("open")
-  notes           String?
-  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime      @default(now()) @map("updated_at") @db.Timestamptz(6)
-  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sales           Sale[]
-  transactions    Transaction[]
+model cash_sessions {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id          String    @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  responsible      String
+  opened_at        DateTime  @default(now()) @db.Timestamptz(6)
+  closed_at        DateTime? @db.Timestamptz(6)
+  opening_balance  Decimal   @default(0) @db.Decimal(14, 2)
+  closing_balance  Decimal?  @db.Decimal(14, 2)
+  expected_balance Decimal?  @db.Decimal(14, 2)
+  difference       Decimal?  @default(dbgenerated()) @db.Decimal(14, 2)
+  status           String    @default("open")
+  notes            String?
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime  @default(now()) @db.Timestamptz(6)
 
-  @@unique([userId, id], map: "uq_cash_sessions_tenant_id")
-  @@index([userId, openedAt(sort: Desc)], map: "idx_cash_sessions_user_opened")
-  @@map("cash_sessions")
+  @@unique([user_id, id], map: "uq_cash_sessions_tenant_id")
+  @@index([user_id, opened_at(sort: Desc)], map: "idx_cash_sessions_user_opened")
 }
 
-model Sale {
-  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId         String        @map("user_id") @db.Uuid
-  cashSessionId  String?       @map("cash_session_id") @db.Uuid
-  customerId     String?       @map("customer_id") @db.Uuid
-  description    String?
-  paymentMethod  String        @map("payment_method")
-  status         String        @default("completed")
-  totalAmount    Decimal       @map("total_amount") @db.Decimal(14, 2)
-  soldAt         DateTime      @default(now()) @map("sold_at") @db.Timestamptz(6)
-  cancelledAt    DateTime?     @map("cancelled_at") @db.Timestamptz(6)
-  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime      @default(now()) @map("updated_at") @db.Timestamptz(6)
-  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cashSession    CashSession?  @relation(fields: [userId, cashSessionId], references: [userId, id], onDelete: Restrict)
-  customer       Customer?     @relation(fields: [userId, customerId], references: [userId, id], onDelete: Restrict)
-  items          SaleItem[]
-  creditSale     CreditSale?
-  transactions   Transaction[]
+model sales {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id         String    @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  cash_session_id String?   @db.Uuid
+  customer_id     String?   @db.Uuid
+  description     String?
+  payment_method  String
+  status          String    @default("completed")
+  total_amount    Decimal   @db.Decimal(14, 2)
+  sold_at         DateTime  @default(now()) @db.Timestamptz(6)
+  cancelled_at    DateTime? @db.Timestamptz(6)
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime  @default(now()) @db.Timestamptz(6)
 
-  @@unique([userId, id], map: "uq_sales_tenant_id")
-  @@index([userId, soldAt(sort: Desc)], map: "idx_sales_user_sold")
-  @@index([userId, cashSessionId, soldAt(sort: Desc)], map: "idx_sales_user_session_sold")
-  @@index([userId, customerId, soldAt(sort: Desc)], map: "idx_sales_user_customer_sold")
-  @@index([userId, paymentMethod, status], map: "idx_sales_user_payment_status")
-  @@map("sales")
+  @@unique([user_id, id], map: "uq_sales_tenant_id")
+  @@index([user_id, sold_at(sort: Desc)], map: "idx_sales_user_sold")
+  @@index([user_id, cash_session_id, sold_at(sort: Desc)], map: "idx_sales_user_session_sold")
+  @@index([user_id, customer_id, sold_at(sort: Desc)], map: "idx_sales_user_customer_sold")
+  @@index([user_id, payment_method, status], map: "idx_sales_user_payment_status")
 }
 
-model SaleItem {
-  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId      String       @map("user_id") @db.Uuid
-  saleId      String       @map("sale_id") @db.Uuid
-  productId   String?      @map("product_id") @db.Uuid
-  productName String       @map("product_name")
-  quantity    Decimal      @db.Decimal(14, 3)
-  unitPrice   Decimal      @map("unit_price") @db.Decimal(14, 2)
-  unitCost    Decimal      @default(0) @map("unit_cost") @db.Decimal(14, 2)
-  totalAmount Decimal?     @default(dbgenerated()) @map("total_amount") @db.Decimal(14, 2)
-  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sale        Sale         @relation(fields: [userId, saleId], references: [userId, id], onDelete: Cascade)
-  product     Product?     @relation(fields: [userId, productId], references: [userId, id], onDelete: Restrict)
+model sale_items {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id      String   @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  sale_id      String   @db.Uuid
+  product_id   String?  @db.Uuid
+  product_name String
+  quantity     Decimal  @db.Decimal(14, 3)
+  unit_price   Decimal  @db.Decimal(14, 2)
+  unit_cost    Decimal  @default(0) @db.Decimal(14, 2)
+  total_amount Decimal  @default(dbgenerated()) @db.Decimal(14, 2)
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
 
-  @@unique([userId, id], map: "uq_sale_items_tenant_id")
-  @@index([userId, saleId], map: "idx_sale_items_user_sale")
-  @@index([userId, productId], map: "idx_sale_items_user_product")
-  @@map("sale_items")
+  @@unique([user_id, id], map: "uq_sale_items_tenant_id")
+  @@index([user_id, sale_id], map: "idx_sale_items_user_sale")
+  @@index([user_id, product_id], map: "idx_sale_items_user_product")
 }
 
-model FixedExpense {
-  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId        String        @map("user_id") @db.Uuid
+model fixed_expenses {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id       String    @default(dbgenerated("app_current_user_id()")) @db.Uuid
   description   String
-  amount        Decimal       @db.Decimal(14, 2)
-  recurrence    String        @default("monthly")
-  startsOn      DateTime      @default(now()) @map("starts_on") @db.Date
-  endsOn        DateTime?     @map("ends_on") @db.Date
-  nextDueDate   DateTime?     @map("next_due_date") @db.Date
-  dueDay        Int?          @map("due_day") @db.SmallInt
-  active        Boolean       @default(true)
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime      @default(now()) @map("updated_at") @db.Timestamptz(6)
-  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions  Transaction[]
+  amount        Decimal   @db.Decimal(14, 2)
+  recurrence    String    @default("monthly")
+  starts_on     DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  ends_on       DateTime? @db.Date
+  next_due_date DateTime? @db.Date
+  due_day       Int?      @db.SmallInt
+  active        Boolean   @default(true)
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime  @default(now()) @db.Timestamptz(6)
 
-  @@unique([userId, id], map: "uq_fixed_expenses_tenant_id")
-  @@index([userId, active, nextDueDate], map: "idx_fixed_expenses_user_active_due")
-  @@map("fixed_expenses")
+  @@unique([user_id, id], map: "uq_fixed_expenses_tenant_id")
+  @@index([user_id, active, next_due_date], map: "idx_fixed_expenses_user_active_due")
 }
 
-model CreditSale {
-  id           String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId       String        @map("user_id") @db.Uuid
-  saleId       String        @map("sale_id") @db.Uuid
-  customerId   String        @map("customer_id") @db.Uuid
-  amount       Decimal       @db.Decimal(14, 2)
-  paidAmount   Decimal       @default(0) @map("paid_amount") @db.Decimal(14, 2)
-  status       String        @default("pendente")
-  dueDate      DateTime?     @map("due_date") @db.Date
-  paidAt       DateTime?     @map("paid_at") @db.Timestamptz(6)
-  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime      @default(now()) @map("updated_at") @db.Timestamptz(6)
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sale         Sale          @relation(fields: [userId, saleId], references: [userId, id], onDelete: Restrict)
-  customer     Customer      @relation(fields: [userId, customerId], references: [userId, id], onDelete: Restrict)
-  transactions Transaction[]
+model credit_sales {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String    @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  sale_id     String    @db.Uuid
+  customer_id String    @db.Uuid
+  amount      Decimal   @db.Decimal(14, 2)
+  paid_amount Decimal   @default(0) @db.Decimal(14, 2)
+  status      String    @default("pendente")
+  due_date    DateTime? @db.Date
+  paid_at     DateTime? @db.Timestamptz(6)
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime  @default(now()) @db.Timestamptz(6)
 
-  @@unique([userId, id], map: "uq_credit_sales_tenant_id")
-  @@unique([userId, saleId], map: "uq_credit_sales_tenant_sale")
-  @@index([userId, status, dueDate], map: "idx_credit_sales_user_status_due")
-  @@index([userId, customerId, status], map: "idx_credit_sales_user_customer_status")
-  @@index([userId, createdAt(sort: Desc)], map: "idx_credit_sales_user_created")
-  @@map("credit_sales")
+  @@unique([user_id, id], map: "uq_credit_sales_tenant_id")
+  @@unique([user_id, sale_id], map: "uq_credit_sales_tenant_sale")
+  @@index([user_id, status, due_date], map: "idx_credit_sales_user_status_due")
+  @@index([user_id, customer_id, status], map: "idx_credit_sales_user_customer_status")
+  @@index([user_id, created_at(sort: Desc)], map: "idx_credit_sales_user_created")
 }
 
-model Transaction {
-  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId                String         @map("user_id") @db.Uuid
-  cashSessionId         String?        @map("cash_session_id") @db.Uuid
-  saleId                String?        @map("sale_id") @db.Uuid
-  fixedExpenseId        String?        @map("fixed_expense_id") @db.Uuid
-  creditSaleId          String?        @map("credit_sale_id") @db.Uuid
-  type                  String
-  source                String
-  paymentMethod         String         @default("dinheiro") @map("payment_method")
-  amount                Decimal        @db.Decimal(14, 2)
-  description           String?
-  movementKind          String         @default("regular") @map("movement_kind")
-  entryKind             String?        @map("entry_kind")
-  expenseKind           String?        @map("expense_kind")
-  identificationPending Boolean        @default(false) @map("identification_pending")
-  occurredAt            DateTime       @default(now()) @map("occurred_at") @db.Timestamptz(6)
-  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  user                  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cashSession           CashSession?   @relation(fields: [userId, cashSessionId], references: [userId, id], onDelete: Restrict)
-  sale                  Sale?          @relation(fields: [userId, saleId], references: [userId, id], onDelete: Restrict)
-  fixedExpense          FixedExpense?  @relation(fields: [userId, fixedExpenseId], references: [userId, id], onDelete: Restrict)
-  creditSale            CreditSale?    @relation(fields: [userId, creditSaleId], references: [userId, id], onDelete: Restrict)
+model transactions {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                String   @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  cash_session_id        String?  @db.Uuid
+  sale_id                String?  @db.Uuid
+  fixed_expense_id       String?  @db.Uuid
+  credit_sale_id         String?  @db.Uuid
+  type                   String
+  source                 String
+  payment_method         String   @default("dinheiro")
+  amount                 Decimal  @db.Decimal(14, 2)
+  description            String?
+  movement_kind          String   @default("regular")
+  entry_kind             String?
+  expense_kind           String?
+  identification_pending Boolean  @default(false)
+  occurred_at            DateTime @default(now()) @db.Timestamptz(6)
+  created_at             DateTime @default(now()) @db.Timestamptz(6)
 
-  @@unique([userId, id], map: "uq_transactions_tenant_id")
-  @@index([userId, occurredAt(sort: Desc)], map: "idx_transactions_user_occurred")
-  @@index([userId, cashSessionId, occurredAt(sort: Desc)], map: "idx_transactions_user_session_occurred")
-  @@index([userId, source, occurredAt(sort: Desc)], map: "idx_transactions_user_source_occurred")
-  @@map("transactions")
+  @@unique([user_id, id], map: "uq_transactions_tenant_id")
+  @@index([user_id, occurred_at(sort: Desc)], map: "idx_transactions_user_occurred")
+  @@index([user_id, cash_session_id, occurred_at(sort: Desc)], map: "idx_transactions_user_session_occurred")
+  @@index([user_id, source, occurred_at(sort: Desc)], map: "idx_transactions_user_source_occurred")
 }

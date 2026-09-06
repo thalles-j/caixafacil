@@ -5,15 +5,10 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Financas from './Financas';
 
-afterEach(() => cleanup());
-
 vi.mock('../context/AppDataContext', () => ({
   useAppData: () => ({
     data: {
-      config: {
-        nome: 'Negócio de Teste',
-        despesasFixas: [],
-      },
+      config: { nome: 'Negócio de Teste', despesasFixas: [] },
       contas: [],
       clientes: [],
       lancamentosManuais: [],
@@ -30,8 +25,10 @@ vi.mock('../context/AppDataContext', () => ({
   }),
 }));
 
+afterEach(() => cleanup());
+
 describe('abas do Financeiro', () => {
-  it('permite alternar repetidamente sem desmontar ou quebrar a página', () => {
+  it('alterna repetidamente mantendo a página e o indicador estáveis', () => {
     render(
       <MemoryRouter initialEntries={['/financas?tab=pagar']}>
         <Routes>
@@ -47,11 +44,10 @@ describe('abas do Financeiro', () => {
       fireEvent.click(receber);
       fireEvent.click(pagar);
     }
-
     fireEvent.click(receber);
 
-    expect(receber.getAttribute('data-selected')).toBe('true');
-    expect(pagar.getAttribute('data-selected')).toBe('false');
+    expect(receber.getAttribute('aria-pressed')).toBe('true');
+    expect(pagar.getAttribute('aria-pressed')).toBe('false');
     expect(screen.getByText(/Nenhuma entrada registrada/)).toBeTruthy();
   });
 });

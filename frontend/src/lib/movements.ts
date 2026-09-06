@@ -1,4 +1,4 @@
-import type { AppData, FormaPagamento, Produto, TipoLancamento } from '../types';
+import type { AppData, FormaPagamento, Produto, TipoEntrada, TipoLancamento } from '../types';
 
 export type OrigemMovimentacao = 'venda' | 'lancamento' | 'conta';
 
@@ -13,6 +13,7 @@ export interface Movimentacao {
   detalhe: string;
   formaPagamento?: FormaPagamento;
   itemType?: Produto['type'];
+  tipoEntrada?: TipoEntrada;
   fiadoPendente?: boolean;
   ocorridoEm: string;
   ordem: number;
@@ -119,6 +120,7 @@ export function obterVendas(data: AppData): Movimentacao[] {
   const vendas: Movimentacao[] = data.vendas.map((venda, index) => {
       const conta = contasPorVenda.get(venda.id);
       const fiadoPendente = venda.formaPagamento === 'fiado' && !conta?.quitado;
+      const itemType = venda.produtoId ? produtosPorId.get(venda.produtoId)?.type : venda.tipoItem;
       return {
         id: venda.id,
         data: venda.data,
@@ -134,7 +136,8 @@ export function obterVendas(data: AppData): Movimentacao[] {
               : `Fiado · recebido${conta?.dataQuitacao ? ` em ${conta.dataQuitacao}` : ''}`
             : `${venda.quantidade} un. · ${formaPagamentoLabel(venda.formaPagamento)}`,
         formaPagamento: venda.formaPagamento,
-        itemType: venda.produtoId ? produtosPorId.get(venda.produtoId)?.type : undefined,
+        itemType,
+        tipoEntrada: itemType === 'product' ? 'produto' : itemType === 'service' ? 'servico' : undefined,
         fiadoPendente,
         ocorridoEm: venda.createdAt ?? `${venda.data}T12:00:00.000Z`,
         ordem: index,
@@ -161,6 +164,7 @@ export function obterVendas(data: AppData): Movimentacao[] {
           : lancamento.tipoEntrada === 'servico'
             ? 'service'
             : undefined,
+      tipoEntrada: lancamento.tipoEntrada,
       fiadoPendente: false,
       ocorridoEm: lancamento.createdAt ?? `${lancamento.data}T23:00:00.000Z`,
       ordem: data.vendas.length + index,

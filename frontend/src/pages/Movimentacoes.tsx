@@ -8,12 +8,16 @@ import {
   X,
 } from '@phosphor-icons/react';
 import FinanceNav from '../components/FinanceNav';
+import Pagination from '../components/Pagination';
 import { useAppData } from '../context/AppDataContext';
 import { formatCurrency, formatDate } from '../lib/format';
 import { formaPagamentoLabel, obterMovimentacoesFinanceiras, obterVendas } from '../lib/movements';
-import type { FormaPagamento } from '../types';
+import { paginateItems } from '../lib/pagination';
+import { entryTypeOptionsForOffer } from '../lib/offering';
+import type { FormaPagamento, TipoEntrada } from '../types';
 
 export type ModoMovimentacoes = 'todas' | 'vendas' | 'saidas';
+type FiltroTipoEntrada = 'todas' | TipoEntrada;
 
 const configuracao = {
   todas: {
@@ -39,9 +43,20 @@ export default function Movimentacoes({ modo }: { modo: ModoMovimentacoes }) {
   const [dataInicial, setDataInicial] = useState('');
   const [dataFinal, setDataFinal] = useState('');
   const [formaPagamento, setFormaPagamento] = useState<'todas' | FormaPagamento>('todas');
-  const [tipoItem, setTipoItem] = useState<'geral' | 'product' | 'service'>('geral');
+  const [tipoEntrada, setTipoEntrada] = useState<FiltroTipoEntrada>('todas');
   const [filtrosMobileAbertos, setFiltrosMobileAbertos] = useState(false);
+  const [pagina, setPagina] = useState(1);
   const texto = configuracao[modo];
+  const opcoesFiltroEntrada: ReadonlyArray<{ valor: FiltroTipoEntrada; label: string }> = [
+    { valor: 'todas', label: 'Todas' },
+    ...entryTypeOptionsForOffer(data.config?.oferta).map((opcao) => ({
+      valor: opcao.valor,
+      label: `${opcao.label}s`,
+    })),
+  ];
+  const tipoEntradaEfetivo = opcoesFiltroEntrada.some((opcao) => opcao.valor === tipoEntrada)
+    ? tipoEntrada
+    : 'todas';
 
   const movimentacoes = useMemo(() => {
     const base = modo === 'vendas' ? obterVendas(data) : obterMovimentacoesFinanceiras(data);
@@ -58,29 +73,33 @@ export default function Movimentacoes({ modo }: { modo: ModoMovimentacoes }) {
       const correspondeFim = !dataFinal || movimento.data <= dataFinal;
       const correspondePagamento =
         modo !== 'vendas' || formaPagamento === 'todas' || movimento.formaPagamento === formaPagamento;
-      const correspondeTipoItem = modo !== 'vendas' || tipoItem === 'geral' || movimento.itemType === tipoItem;
-      return correspondeBusca && correspondeInicio && correspondeFim && correspondePagamento && correspondeTipoItem;
+      const correspondeTipoEntrada =
+        modo !== 'vendas' || tipoEntradaEfetivo === 'todas' || movimento.tipoEntrada === tipoEntradaEfetivo;
+      return correspondeBusca && correspondeInicio && correspondeFim && correspondePagamento && correspondeTipoEntrada;
     });
-  }, [busca, data, dataFinal, dataInicial, formaPagamento, modo, tipoItem]);
+  }, [busca, data, dataFinal, dataInicial, formaPagamento, modo, tipoEntradaEfetivo]);
 
   const total = movimentacoes.reduce(
     (soma, movimento) => soma + (modo === 'todas' && movimento.tipo === 'saida' ? -movimento.valor : movimento.valor),
     0,
   );
+  const movimentacoesPaginadas = paginateItems(movimentacoes, pagina);
 
   const limparFiltros = () => {
     setBusca('');
     setDataInicial('');
     setDataFinal('');
     setFormaPagamento('todas');
-    setTipoItem('geral');
+    setTipoEntrada('todas');
+    setPagina(1);
   };
 
   const filtrosAtivos = Boolean(
-    busca || dataInicial || dataFinal || formaPagamento !== 'todas' || tipoItem !== 'geral',
+    busca || dataInicial || dataFinal || formaPagamento !== 'todas' || tipoEntradaEfetivo !== 'todas',
   );
   const quantidadeFiltrosAvancados =
-    Number(Boolean(dataInicial)) + Number(Boolean(dataFinal)) + Number(formaPagamento !== 'todas');
+    Number(Boolean(dataInicial)) + Number(Boolean(dataFinal)) + Number(formaPagamento !== 'todas') +
+    Number(tipoEntradaEfetivo !== 'todas');
 
   return (
     <div className="fade-in">
@@ -89,38 +108,12 @@ export default function Movimentacoes({ modo }: { modo: ModoMovimentacoes }) {
 
       <FinanceNav />
 
-      {modo === 'vendas' && (
-        <div className="mb-4 grid grid-cols-3 rounded-xl bg-line/40 p-1" aria-label="Filtrar entradas por tipo">
-          {([
-            ['geral', 'Geral'],
-            ['product', 'Produtos'],
-            ['service', 'Serviços'],
-          ] as const).map(([valorTipo, label]) => (
-            <button
-              key={valorTipo}
-              type="button"
-              data-selected={tipoItem === valorTipo}
-              onClick={() => setTipoItem(valorTipo)}
-              className={`choice-option rounded-lg px-3 py-2 text-sm font-semibold ${
-                tipoItem === valorTipo ? 'bg-paper-raised text-ink shadow-sm' : 'text-ink-soft hover:text-ink'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
-
       <section className="mb-4 rounded-2xl border border-line bg-paper-raised p-3 shadow-sm md:p-4">
-        <div className="mb-3 flex items-center justify-between gap-3 text-ink-soft">
-          <div className="flex items-center gap-2">
-            <MagnifyingGlass size={17} />
-            <h3 className="text-xs font-bold uppercase tracking-wide">Pesquisar</h3>
-          </div>
+        <div className="mb-3 flex justify-end text-ink-soft md:hidden">
           <button
             type="button"
             onClick={() => setFiltrosMobileAbertos((aberto) => !aberto)}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold md:hidden ${
+            className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold ${
               filtrosMobileAbertos || quantidadeFiltrosAvancados > 0
                 ? 'bg-ledger/10 text-ledger-strong dark:text-ledger'
                 : 'bg-line/40 text-ink-soft'
@@ -135,6 +128,38 @@ export default function Movimentacoes({ modo }: { modo: ModoMovimentacoes }) {
             )}
           </button>
         </div>
+        {modo === 'vendas' && (
+          <div
+            data-choice-position={
+              ['first', 'second', 'third', 'fourth'][
+                Math.max(0, opcoesFiltroEntrada.findIndex((opcao) => opcao.valor === tipoEntradaEfetivo))
+              ]
+            }
+            className={`segmented-slider neutral-tabs-selector mb-3 grid rounded-xl border border-line bg-line/40 p-1 ${
+              opcoesFiltroEntrada.length === 3
+                ? 'segmented-slider-3 grid-cols-3'
+                : 'segmented-slider-4 grid-cols-4'
+            }`}
+            aria-label="Filtrar entradas por tipo"
+          >
+            {opcoesFiltroEntrada.map(({ valor: valorTipo, label }) => (
+              <button
+                key={valorTipo}
+                type="button"
+                aria-pressed={tipoEntradaEfetivo === valorTipo}
+                onClick={() => {
+                  setTipoEntrada(valorTipo);
+                  setPagina(1);
+                }}
+                className={`selection-option min-w-0 rounded-lg border-0 px-1 py-2 text-xs font-semibold sm:px-3 sm:text-sm ${
+                  tipoEntradaEfetivo === valorTipo ? 'bg-paper-raised text-ink shadow-sm' : 'text-ink-soft hover:text-ink'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         <div
           className={`grid gap-3 ${
             modo === 'vendas'
@@ -151,7 +176,10 @@ export default function Movimentacoes({ modo }: { modo: ModoMovimentacoes }) {
               <input
                 type="search"
                 value={busca}
-                onChange={(event) => setBusca(event.target.value)}
+                onChange={(event) => {
+                  setBusca(event.target.value);
+                  setPagina(1);
+                }}
                 aria-label="Pesquisar por nome ou descrição"
                 placeholder="Pesquisar por nome ou descrição"
                 className="w-full rounded-xl border border-line bg-paper py-2.5 pl-10 pr-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-ledger/30"
@@ -163,7 +191,10 @@ export default function Movimentacoes({ modo }: { modo: ModoMovimentacoes }) {
             <input
               type="date"
               value={dataInicial}
-              onChange={(event) => setDataInicial(event.target.value)}
+              onChange={(event) => {
+                setDataInicial(event.target.value);
+                setPagina(1);
+              }}
               aria-label="Data inicial"
               className="w-full rounded-xl border border-line bg-paper px-3 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-ledger/30"
             />
@@ -173,7 +204,10 @@ export default function Movimentacoes({ modo }: { modo: ModoMovimentacoes }) {
             <input
               type="date"
               value={dataFinal}
-              onChange={(event) => setDataFinal(event.target.value)}
+              onChange={(event) => {
+                setDataFinal(event.target.value);
+                setPagina(1);
+              }}
               aria-label="Data final"
               className="w-full rounded-xl border border-line bg-paper px-3 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-ledger/30"
             />
@@ -183,7 +217,10 @@ export default function Movimentacoes({ modo }: { modo: ModoMovimentacoes }) {
               <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-ink-soft">Pagamento</span>
               <select
                 value={formaPagamento}
-                onChange={(event) => setFormaPagamento(event.target.value as 'todas' | FormaPagamento)}
+                onChange={(event) => {
+                  setFormaPagamento(event.target.value as 'todas' | FormaPagamento);
+                  setPagina(1);
+                }}
                 className="w-full rounded-xl border border-line bg-paper px-3 py-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-ledger/30"
               >
                 <option value="todas">Todas as formas</option>
@@ -229,7 +266,7 @@ export default function Movimentacoes({ modo }: { modo: ModoMovimentacoes }) {
           </div>
         ) : (
           <ul className="divide-y divide-line">
-            {movimentacoes.map((movimento) => {
+            {movimentacoesPaginadas.items.map((movimento) => {
               const isSaida = movimento.tipo === 'saida';
               const fiadoPendente = Boolean(movimento.fiadoPendente);
               return (
@@ -273,6 +310,12 @@ export default function Movimentacoes({ modo }: { modo: ModoMovimentacoes }) {
           </ul>
         )}
       </div>
+      <Pagination
+        currentPage={movimentacoesPaginadas.currentPage}
+        totalItems={movimentacoes.length}
+        onPageChange={setPagina}
+        itemLabel="movimentações"
+      />
     </div>
   );
 }

@@ -399,18 +399,18 @@ describe('AppDataContext', () => {
   });
 
   describe('categorias personalizadas', () => {
-    it('renomeia a categoria nos produtos e preserva os produtos ao excluir', () => {
+    it('renomeia a categoria nos produtos e preserva os produtos ao excluir', async () => {
       const { result } = renderAppData();
 
       let criada = false;
-      act(() => {
-        criada = result.current.addCategoria('Bebidas');
+      await act(async () => {
+        criada = await result.current.addCategoria('Bebidas');
       });
       expect(criada).toBe(true);
 
       const categoria = result.current.data.categorias[0];
-      act(() => {
-        result.current.addProduto({
+      await act(async () => {
+        await result.current.addProduto({
           type: 'product',
           nome: 'Refrigerante',
           categoria: 'Bebidas',
@@ -421,14 +421,14 @@ describe('AppDataContext', () => {
       });
 
       let editada = false;
-      act(() => {
-        editada = result.current.editarCategoria(categoria.id, 'Bebidas geladas');
+      await act(async () => {
+        editada = await result.current.editarCategoria(categoria.id, 'Bebidas geladas');
       });
       expect(editada).toBe(true);
       expect(result.current.data.produtos[0].categoria).toBe('Bebidas geladas');
 
-      act(() => {
-        result.current.removerCategoria(categoria.id);
+      await act(async () => {
+        await result.current.removerCategoria(categoria.id);
       });
       expect(result.current.data.categorias).toHaveLength(0);
       expect(result.current.data.produtos).toHaveLength(1);

@@ -1,8 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Lock, Storefront } from '@phosphor-icons/react';
+import { ArrowLeft, Headset, Lock, Storefront } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import LoadingScreen from '../components/LoadingScreen';
+import { postLoginPath } from '../lib/roles';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -17,8 +18,8 @@ export default function Login() {
     setErro(null);
     setEnviando(true);
     try {
-      await login(email, senha);
-      navigate('/');
+      const user = await login(email, senha);
+      navigate(postLoginPath(user.role));
     } catch (err) {
       setErro(err instanceof Error ? err.message : 'Não foi possível entrar.');
     } finally {
@@ -50,6 +51,7 @@ export default function Login() {
             <input
               type="email"
               required
+              maxLength={254}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="voce@seunegocio.com"
@@ -66,6 +68,7 @@ export default function Login() {
             <input
               type="password"
               required
+              maxLength={72}
               value={senha}
               onChange={(e) => setSenha(e.target.value)}
               placeholder="••••••••"
@@ -73,7 +76,14 @@ export default function Login() {
             />
           </div>
 
-          {erro && <p className="text-xs font-medium text-stamp">{erro}</p>}
+          {erro && (
+            <div className="rounded-lg bg-stamp/10 p-3 text-xs font-medium text-stamp">
+              <p>{erro}</p>
+              <Link to="/suporte" className="mt-2 inline-flex items-center gap-1 font-bold underline">
+                <Headset size={15} /> Falar com o suporte
+              </Link>
+            </div>
+          )}
 
           <button
             type="submit"
@@ -91,6 +101,9 @@ export default function Login() {
           </Link>
         </p>
       </div>
+      <Link to="/suporte" className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-ink-soft transition hover:text-ink">
+        <Headset size={17} /> Precisa de ajuda? Fale com o suporte
+      </Link>
     </div>
   );
 }

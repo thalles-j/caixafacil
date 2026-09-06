@@ -4,22 +4,24 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node --watch --import tsx src/index.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
-    "prisma:generate": "prisma generate",
+    "dev": "cross-env NODE_ENV=development node --watch --import tsx src/index.ts",
+    "db:schema": "tsx src/scripts/apply-schema.ts",
+    "db:schema:prod": "node dist/scripts/apply-schema.js",
+    "seed": "prisma db seed",
     "prisma:validate": "prisma validate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:deploy": "prisma migrate deploy",
-    "seed": "prisma db seed"
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "start": "cross-env NODE_ENV=production node dist/index.js",
+    "test": "vitest run"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
   },
   "dependencies": {
-    "@prisma/client": "^6.19.0",
+    "@prisma/client": "^6.16.3",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
+    "cross-env": "^7.0.3",
     "dotenv": "^16.4.5",
     "express": "^4.21.1",
     "jsonwebtoken": "^9.0.2",
@@ -32,8 +34,9 @@
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
-    "prisma": "^6.19.0",
+    "prisma": "^6.16.3",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.10"
   }
 }

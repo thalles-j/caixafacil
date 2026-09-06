@@ -1,7 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import {
   clearStoredToken,
-  decodeToken,
   ensureStoredAccessToken,
   getStoredToken,
   isTokenValid,
@@ -12,7 +11,6 @@ import {
   resetAccountDataRequest,
   sessionRequest,
   setStoredToken,
-  TOKEN_KEY,
   changePasswordRequest,
 } from '../lib/auth';
 import { APP_DATA_CHANGED_EVENT } from '../lib/storage';
@@ -20,13 +18,14 @@ import { APP_DATA_CHANGED_EVENT } from '../lib/storage';
 interface AuthUser {
   id: string;
   email: string;
+  role: 'client' | 'admin';
 }
 
 interface AuthContextValue {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isInitializing: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<AuthUser>;
   register: (email: string, password: string, confirmPassword: string) => Promise<void>;
   resetAccountData: () => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string, confirmPassword: string) => Promise<string>;
@@ -34,12 +33,6 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-function userFromToken(token: string | null): AuthUser | null {
-  if (!isTokenValid(token)) return null;
-  const payload = decodeToken(token);
-  return payload ? { id: payload.sub, email: payload.email } : null;
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -104,23 +97,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => clearInterval(interval);
   }, [user]);
 
-  useEffect(() => {
-    const handleStorageChange = (event: StorageEvent) => {
-      if (event.storageArea !== localStorage) return;
-      if (event.key !== null && event.key !== TOKEN_KEY) return;
-      setUser(userFromToken(getStoredToken()));
-    };
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
-
   const login = async (email: string, password: string) => {
-    const tempoMinimoDeCarregamento = new Promise<void>((resolve) => window.setTimeout(resolve, 900));
+    const tempoMinimoDeCarregamento = new Promise<void>((resolve) => window.setTimeout(resolve, 100));
     const { token, user: loggedUser, data } = await loginRequest(email, password);
+    const paginasPrincipaisCarregadas = loggedUser.role === 'admin'
+      ? Promise.all([import('../components/AdminLayout'), import('../pages/admin/AdminClients')])
+      : Promise.all([import('../components/Layout'), import('../pages/Dashboard')]);
     setStoredToken(token);
     window.dispatchEvent(new CustomEvent(APP_DATA_CHANGED_EVENT, { detail: data }));
-    await tempoMinimoDeCarregamento;
+    await Promise.all([tempoMinimoDeCarregamento, paginasPrincipaisCarregadas]);
     setUser(loggedUser);
+    return loggedUser;
   };
 
   const register = async (email: string, password: string, confirmPassword: string) => {

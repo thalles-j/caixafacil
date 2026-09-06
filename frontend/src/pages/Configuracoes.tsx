@@ -1,7 +1,10 @@
 import { useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import {
+  ArrowRight,
   DownloadSimple,
   EnvelopeSimple,
+  Headset,
   Key,
   Moon,
   PaperPlaneTilt,
@@ -15,12 +18,21 @@ import {
 } from '@phosphor-icons/react';
 import { useAppData } from '../context/AppDataContext';
 import { useAuth } from '../context/AuthContext';
+import { PASSWORD_HINT, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, passwordPolicyError } from '../lib/passwordPolicy';
 import { formatCurrency, parseMoney, sanitizeMoneyInput, todayISO } from '../lib/format';
-import { isValidAppData, loadData, saveData } from '../lib/storage';
+import {
+  ensureStoredAccessToken,
+  exportAccountBackupRequest,
+  restoreAccountBackupRequest,
+  type AccountBackup,
+} from '../lib/auth';
 import { useDarkMode } from '../lib/theme';
 import { RAMOS_ATUACAO } from '../types';
-import type { AppData, FrequenciaRelatorio, Oferta, Recorrencia, ViewPeriod } from '../types';
+import type { FrequenciaRelatorio, Oferta, Recorrencia, ViewPeriod } from '../types';
 import Modal from '../components/Modal';
+import Pagination from '../components/Pagination';
+import { paginateItems } from '../lib/pagination';
+import { sendReportEmailRequest } from '../lib/business';
 
 export default function Configuracoes() {
   const { data, setConfig, resetData, cadastrarDespesaFixaNoBanco, removerDespesaFixaNoBanco } = useAppData();
@@ -32,7 +44,11 @@ export default function Configuracoes() {
   const [novaDespesaRecorrencia, setNovaDespesaRecorrencia] = useState<Recorrencia>('mensal');
   const [darkMode, setDarkMode] = useDarkMode();
   const [importErro, setImportErro] = useState<string | null>(null);
-  const [importPendente, setImportPendente] = useState<AppData | null>(null);
+  const [importPendente, setImportPendente] = useState<AccountBackup | null>(null);
+  const [backupProcessando, setBackupProcessando] = useState(false);
+  const [configErro, setConfigErro] = useState<string | null>(null);
+  const [relatorioEnviando, setRelatorioEnviando] = useState(false);
+  const [relatorioMensagem, setRelatorioMensagem] = useState<string | null>(null);
   const [resetando, setResetando] = useState(false);
   const [resetErro, setResetErro] = useState<string | null>(null);
   const [acaoPendente, setAcaoPendente] = useState<'logout' | 'reset' | null>(null);
@@ -44,12 +60,18 @@ export default function Configuracoes() {
   const [senhaSalvando, setSenhaSalvando] = useState(false);
   const [senhaErro, setSenhaErro] = useState<string | null>(null);
   const [senhaSucesso, setSenhaSucesso] = useState<string | null>(null);
+  const [paginaDespesasFixas, setPaginaDespesasFixas] = useState(1);
   const arquivoInputRef = useRef<HTMLInputElement>(null);
+
+  const despesasFixasPaginadas = paginateItems(config?.despesasFixas ?? [], paginaDespesasFixas);
 
   if (!config) return null;
 
   const salvarCampo = (patch: Partial<typeof config>) => {
-    setConfig({ ...config, ...patch });
+    setConfigErro(null);
+    void setConfig({ ...config, ...patch }).catch((error) => {
+      setConfigErro(error instanceof Error ? error.message : 'Não foi possível salvar a configuração.');
+    });
   };
 
   const adicionarDespesaFixa = async (e: FormEvent) => {
@@ -83,23 +105,40 @@ export default function Configuracoes() {
     }
   };
 
-  const enviarRelatorioAgora = () => {
-    // TODO: integração real fica para versão futura com backend
-    alert(`Relatório simulado enviado para ${config.relatorio.email || '(nenhum e-mail cadastrado)'}.`);
+  const enviarRelatorioAgora = async () => {
+    setRelatorioEnviando(true);
+    setRelatorioMensagem(null);
+    try {
+      const response = await sendReportEmailRequest();
+      setRelatorioMensagem(response.message);
+    } catch (error) {
+      setRelatorioMensagem(error instanceof Error ? error.message : 'Não foi possível enviar o relatório.');
+    } finally {
+      setRelatorioEnviando(false);
+    }
   };
 
-  const exportarDados = () => {
-    const dados = loadData(user?.id);
-    const conteudo = JSON.stringify(dados, null, 2);
-    const blob = new Blob([conteudo], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `backup-caixafacil-${todayISO()}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  const exportarDados = async () => {
+    setBackupProcessando(true);
+    setImportErro(null);
+    try {
+      const token = await ensureStoredAccessToken();
+      const dados = await exportAccountBackupRequest(token);
+      const conteudo = JSON.stringify(dados, null, 2);
+      const blob = new Blob([conteudo], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `backup-caixafacil-${todayISO()}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setImportErro(error instanceof Error ? error.message : 'Não foi possível exportar o backup.');
+    } finally {
+      setBackupProcessando(false);
+    }
   };
 
   const abrirSeletorDeArquivo = () => {
@@ -117,12 +156,15 @@ export default function Configuracoes() {
     leitor.onload = () => {
       try {
         const parsed = JSON.parse(String(leitor.result));
-        if (!isValidAppData(parsed)) {
-          setImportErro('Arquivo inválido: não é um backup reconhecível do CaixaFácil.');
+        if (
+          !parsed || parsed.format !== 'caixafacil-postgres-backup' ||
+          parsed.version !== 2 || typeof parsed.tables !== 'object'
+        ) {
+          setImportErro('Arquivo inválido ou versão de backup não suportada.');
           return;
         }
         setImportErro(null);
-        setImportPendente(parsed);
+        setImportPendente(parsed as AccountBackup);
       } catch {
         setImportErro('Arquivo inválido: não foi possível interpretar o conteúdo como JSON.');
       }
@@ -131,10 +173,19 @@ export default function Configuracoes() {
     leitor.readAsText(arquivo);
   };
 
-  const confirmarImportacao = () => {
+  const confirmarImportacao = async () => {
     if (!importPendente) return;
-    saveData(importPendente, user?.id);
-    window.location.reload();
+    setBackupProcessando(true);
+    setImportErro(null);
+    try {
+      const token = await ensureStoredAccessToken();
+      await restoreAccountBackupRequest(token, importPendente);
+      window.location.reload();
+    } catch (error) {
+      setImportErro(error instanceof Error ? error.message : 'Não foi possível restaurar o backup.');
+      setImportPendente(null);
+      setBackupProcessando(false);
+    }
   };
 
   const zerarDadosDaConta = async () => {
@@ -168,8 +219,9 @@ export default function Configuracoes() {
     event.preventDefault();
     setSenhaErro(null);
     setSenhaSucesso(null);
-    if (novaSenha.length < 6) {
-      setSenhaErro('A nova senha deve ter pelo menos 6 caracteres.');
+    const senhaInvalida = passwordPolicyError(novaSenha);
+    if (senhaInvalida) {
+      setSenhaErro(senhaInvalida);
       return;
     }
     if (novaSenha !== confirmarNovaSenha) {
@@ -243,6 +295,7 @@ export default function Configuracoes() {
                 <input
                   type="password"
                   autoComplete="current-password"
+                  maxLength={PASSWORD_MAX_LENGTH}
                   value={senhaAtual}
                   onChange={(event) => setSenhaAtual(event.target.value)}
                   placeholder="Digite sua senha atual"
@@ -256,10 +309,11 @@ export default function Configuracoes() {
               <input
                 type="password"
                 autoComplete="new-password"
-                minLength={6}
+                minLength={PASSWORD_MIN_LENGTH}
+                maxLength={PASSWORD_MAX_LENGTH}
                 value={novaSenha}
                 onChange={(event) => setNovaSenha(event.target.value)}
-                placeholder="Mínimo de 6 caracteres"
+                placeholder={PASSWORD_HINT}
                 required
                 className={inputClasses}
               />
@@ -269,7 +323,8 @@ export default function Configuracoes() {
               <input
                 type="password"
                 autoComplete="new-password"
-                minLength={6}
+                minLength={PASSWORD_MIN_LENGTH}
+                maxLength={PASSWORD_MAX_LENGTH}
                 value={confirmarNovaSenha}
                 onChange={(event) => setConfirmarNovaSenha(event.target.value)}
                 placeholder="Digite novamente"
@@ -378,12 +433,32 @@ export default function Configuracoes() {
         </section>
 
         <section className="rounded-2xl border border-line bg-paper-raised p-4 shadow-sm">
+          <div className="flex items-start gap-3">
+            <span className="rounded-xl bg-ledger/10 p-2.5 text-ledger-strong dark:text-ledger">
+              <Headset size={20} weight="duotone" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-sm font-bold uppercase tracking-wide text-ink-soft">Ajuda e suporte</h3>
+              <p className="mt-1 text-xs leading-relaxed text-ink-soft">
+                Está com problema no acesso, caixa ou configurações? Envie uma mensagem para a equipe.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/suporte"
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg border border-ledger/25 bg-ledger/10 px-4 py-2.5 text-sm font-bold text-ledger-strong transition hover:border-ledger/40 hover:bg-ledger/20 dark:text-ledger"
+          >
+            Falar com o suporte <ArrowRight size={17} weight="bold" />
+          </Link>
+        </section>
+
+        <section className="rounded-2xl border border-line bg-paper-raised p-4 shadow-sm">
           <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-ink-soft">Despesas Fixas</h3>
           <ul className="mb-3 space-y-2">
             {config.despesasFixas.length === 0 && (
               <p className="text-sm text-ink-soft">Nenhuma despesa fixa cadastrada.</p>
             )}
-            {config.despesasFixas.map((d) => (
+            {despesasFixasPaginadas.items.map((d) => (
               <li key={d.id} className="flex items-center justify-between gap-2 rounded-lg bg-paper p-2 text-sm">
                 <span className="min-w-0 truncate text-ink">
                   {d.nome} <span className="text-ink-soft">({d.recorrencia})</span>
@@ -397,7 +472,13 @@ export default function Configuracoes() {
               </li>
             ))}
           </ul>
-          <form onSubmit={adicionarDespesaFixa} className="space-y-2">
+          <Pagination
+            currentPage={despesasFixasPaginadas.currentPage}
+            totalItems={config.despesasFixas.length}
+            onPageChange={setPaginaDespesasFixas}
+            itemLabel="despesas fixas"
+          />
+          <form onSubmit={adicionarDespesaFixa} className="mt-4 space-y-2">
             <input
               type="text"
               value={novaDespesaNome}
@@ -436,6 +517,7 @@ export default function Configuracoes() {
 
         <section className="rounded-2xl border border-line bg-paper-raised p-4 shadow-sm">
           <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-ink-soft">Relatórios</h3>
+          {configErro && <p role="alert" className="mb-3 text-xs font-medium text-stamp">{configErro}</p>}
           <div className="space-y-4">
             <div>
               <label className="mb-1 block text-xs font-medium text-ink-soft">Frequência</label>
@@ -476,28 +558,33 @@ export default function Configuracoes() {
               </div>
             )}
             <button
-              onClick={enviarRelatorioAgora}
+              onClick={() => void enviarRelatorioAgora()}
+              disabled={relatorioEnviando}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-ledger py-2.5 text-sm font-bold text-paper transition hover:bg-ledger-strong"
             >
-              <PaperPlaneTilt size={18} /> Enviar Relatório Agora
+              <PaperPlaneTilt size={18} /> {relatorioEnviando ? 'Enviando…' : 'Enviar Relatório Agora'}
             </button>
+            {relatorioMensagem && <p role="status" className="text-xs font-medium text-ink-soft">{relatorioMensagem}</p>}
           </div>
         </section>
 
         <section className="rounded-2xl border border-line bg-paper-raised p-4 shadow-sm">
           <h3 className="mb-1 text-sm font-bold uppercase tracking-wide text-ink-soft">Backup</h3>
           <p className="mb-3 text-xs text-ink-soft">
-            Seus dados ficam só neste aparelho. Exporte um backup de vez em quando para não correr o risco de perdê-los.
+            Seus dados operacionais ficam no PostgreSQL/Neon. Este arquivo exporta catálogo, clientes, caixas, vendas,
+            fiado, movimentações e configurações da sua conta.
           </p>
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
-              onClick={exportarDados}
+              onClick={() => void exportarDados()}
+              disabled={backupProcessando}
               className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-ledger/10 py-2.5 text-sm font-bold text-ledger-strong transition hover:bg-ledger/20 dark:text-ledger"
             >
-              <DownloadSimple size={18} /> Exportar Dados
+              <DownloadSimple size={18} /> {backupProcessando ? 'Processando…' : 'Exportar Dados'}
             </button>
             <button
               onClick={abrirSeletorDeArquivo}
+              disabled={backupProcessando}
               className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-line py-2.5 text-sm font-bold text-ink transition hover:bg-line/30"
             >
               <UploadSimple size={18} /> Importar Dados
@@ -544,7 +631,8 @@ export default function Configuracoes() {
               Cancelar
             </button>
             <button
-              onClick={confirmarImportacao}
+              onClick={() => void confirmarImportacao()}
+              disabled={backupProcessando}
               className="flex-1 rounded-lg bg-stamp px-4 py-2 text-sm font-semibold text-paper transition hover:bg-stamp/90"
             >
               Substituir Dados

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   MagnifyingGlass,
@@ -17,6 +17,7 @@ import {
 } from '@phosphor-icons/react';
 import { useAppData } from '../context/AppDataContext';
 import { formatCurrency, parseMoney, sanitizeIntegerInput, sanitizeMoneyInput } from '../lib/format';
+import { catalogTypesForOffer } from '../lib/offering';
 import type { Cliente, FormaPagamento } from '../types';
 import Modal from '../components/Modal';
 
@@ -34,6 +35,10 @@ interface ConfirmacaoCobranca {
   quantidadeItens: number;
   cliente?: string;
 }
+
+type BrowserBarcodeDetector = {
+  detect(source: HTMLVideoElement): Promise<Array<{ rawValue: string }>>;
+};
 
 const FORMAS: { forma: FormaPagamento; label: string; Icon: typeof Money; classes: string }[] = [
   { forma: 'dinheiro', label: 'Dinheiro', Icon: Money, classes: 'bg-line/50 text-ink' },
@@ -66,12 +71,22 @@ export default function Caixa() {
   const [erroOperacao, setErroOperacao] = useState<string | null>(null);
   const [modalAbertura, setModalAbertura] = useState(false);
   const [valorInicial, setValorInicial] = useState('');
+  const [scannerAberto, setScannerAberto] = useState(false);
+  const [codigoScanner, setCodigoScanner] = useState('');
+  const [scannerErro, setScannerErro] = useState<string | null>(null);
+  const scannerVideoRef = useRef<HTMLVideoElement>(null);
+  const tiposCatalogoPermitidos = useMemo(
+    () => catalogTypesForOffer(data.config?.oferta),
+    [data.config?.oferta],
+  );
 
   const resultados = useMemo(() => {
     if (!busca.trim()) return [];
     const termo = busca.trim().toLowerCase();
-    return data.produtos.filter((p) => p.nome.toLowerCase().includes(termo)).slice(0, 6);
-  }, [busca, data.produtos]);
+    return data.produtos
+      .filter((p) => tiposCatalogoPermitidos.includes(p.type) && p.nome.toLowerCase().includes(termo))
+      .slice(0, 6);
+  }, [busca, data.produtos, tiposCatalogoPermitidos]);
 
   const clientesFiltrados = useMemo(() => {
     const termo = buscaCliente.trim().toLowerCase();
@@ -84,7 +99,9 @@ export default function Caixa() {
   const quantidadeProdutoSelecionada = Math.max(1, Number(quantidadeProduto) || 1);
 
   const adicionarProduto = (produtoId: string) => {
-    const produto = data.produtos.find((p) => p.id === produtoId);
+    const produto = data.produtos.find(
+      (p) => p.id === produtoId && tiposCatalogoPermitidos.includes(p.type),
+    );
     if (!produto) return;
 
     const jaNoCarrinho = carrinho.find((i) => i.produtoId === produtoId)?.quantidade ?? 0;
@@ -135,9 +152,74 @@ export default function Caixa() {
   };
 
   const lerCodigo = () => {
-    // TODO: integração real fica para versão futura com backend
-    alert('Leitura de código de barras simulada — nenhum scanner real conectado.');
+    setCodigoScanner('');
+    const supportsCamera = 'BarcodeDetector' in window && Boolean(navigator.mediaDevices?.getUserMedia);
+    setScannerErro(supportsCamera ? null : 'Câmera indisponível neste navegador. Digite o código ou use um leitor USB/Bluetooth.');
+    setScannerAberto(true);
   };
+
+  const adicionarPorCodigo = (event?: FormEvent) => {
+    event?.preventDefault();
+    const codigo = codigoScanner.trim();
+    const produto = data.produtos.find(
+      (item) => item.codigoBarras === codigo && tiposCatalogoPermitidos.includes(item.type),
+    );
+    if (!produto) {
+      setScannerErro('Nenhum item ativo foi encontrado com esse código.');
+      return;
+    }
+    adicionarProduto(produto.id);
+    setScannerAberto(false);
+  };
+
+  useEffect(() => {
+    if (!scannerAberto) return;
+    let active = true;
+    let frame = 0;
+    let stream: MediaStream | null = null;
+    const BarcodeDetectorCtor = (window as Window & {
+      BarcodeDetector?: new (options?: { formats?: string[] }) => BrowserBarcodeDetector;
+    }).BarcodeDetector;
+
+    if (!BarcodeDetectorCtor || !navigator.mediaDevices?.getUserMedia) return;
+
+    const videoElement = scannerVideoRef.current;
+
+    const start = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+        const video = videoElement;
+        if (!active || !video) return;
+        video.srcObject = stream;
+        await video.play();
+        const detector = new BarcodeDetectorCtor({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'] });
+        const scan = async () => {
+          if (!active) return;
+          try {
+            const codes = await detector.detect(video);
+            if (codes[0]?.rawValue) {
+              setCodigoScanner(codes[0].rawValue);
+              setScannerErro(null);
+              return;
+            }
+          } catch {
+            // Quadros sem leitura são normais; o próximo quadro tenta de novo.
+          }
+          frame = requestAnimationFrame(() => void scan());
+        };
+        void scan();
+      } catch {
+        if (active) setScannerErro('Não foi possível acessar a câmera. Confira a permissão ou digite o código.');
+      }
+    };
+    void start();
+    return () => {
+      active = false;
+      cancelAnimationFrame(frame);
+      stream?.getTracks().forEach((track) => track.stop());
+      if (videoElement) videoElement.srcObject = null;
+    };
+  }, [scannerAberto]);
 
   const selecionarForma = (forma: FormaPagamento) => {
     setFormaSelecionada(forma);
@@ -304,12 +386,18 @@ export default function Caixa() {
                 type="text"
                 value={busca}
                 onChange={(e) => setBusca(e.target.value)}
-                placeholder="Buscar produto..."
+                placeholder={
+                  tiposCatalogoPermitidos.length > 1
+                    ? 'Buscar produto ou serviço...'
+                    : tiposCatalogoPermitidos[0] === 'service'
+                      ? 'Buscar serviço...'
+                      : 'Buscar produto...'
+                }
                 className="w-full rounded-xl border border-line bg-paper py-3 pl-10 pr-3 text-ink focus:border-transparent focus:outline-none focus:ring-2 focus:ring-ledger"
               />
             </div>
             <label className="relative">
-              <span className="sr-only">Quantidade de unidades</span>
+              <span className="sr-only">Quantidade de itens</span>
               <input
                 type="text"
                 inputMode="numeric"
@@ -319,7 +407,7 @@ export default function Caixa() {
                 onBlur={() => {
                   if (!quantidadeProduto || Number(quantidadeProduto) < 1) setQuantidadeProduto('1');
                 }}
-                aria-label="Quantidade de unidades"
+                aria-label="Quantidade de itens"
                 className="w-full rounded-xl border border-line bg-paper py-3 pl-2 pr-7 text-center font-ledger text-sm font-bold tabular-nums text-ink focus:border-transparent focus:outline-none focus:ring-2 focus:ring-ledger"
               />
               <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[9px] font-bold uppercase text-ink-soft">
@@ -442,8 +530,8 @@ export default function Caixa() {
               <button
                 key={forma}
                 onClick={() => selecionarForma(forma)}
-                data-selected={formaSelecionada === forma}
-                className={`choice-option flex flex-col items-center gap-1 rounded-lg py-2 text-xs font-medium ${classes} ${
+                aria-pressed={formaSelecionada === forma}
+                className={`selection-option flex flex-col items-center gap-1 rounded-lg py-2 text-xs font-medium ${classes} ${
                   formaSelecionada === forma ? 'ring-2 ring-ledger' : ''
                 }`}
               >
@@ -660,6 +748,36 @@ export default function Caixa() {
               {salvando ? 'Abrindo…' : 'Abrir Caixa'}
             </button>
           </div>
+        </form>
+      </Modal>
+
+      <Modal open={scannerAberto} onClose={() => setScannerAberto(false)} title="Ler código de barras">
+        <form className="space-y-4" onSubmit={adicionarPorCodigo}>
+          <video
+            ref={scannerVideoRef}
+            muted
+            playsInline
+            className="aspect-video w-full rounded-xl border border-line bg-black object-cover"
+          />
+          <p className="text-xs text-ink-soft">
+            Aponte a câmera para o código. Leitores USB/Bluetooth também funcionam digitando diretamente no campo.
+          </p>
+          <input
+            autoFocus
+            value={codigoScanner}
+            onChange={(event) => setCodigoScanner(event.target.value)}
+            placeholder="Código de barras"
+            inputMode="numeric"
+            className="w-full rounded-lg border border-line bg-paper p-2.5 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-ledger/30"
+          />
+          {scannerErro && <p role="alert" className="text-xs font-medium text-stamp">{scannerErro}</p>}
+          <button
+            type="submit"
+            disabled={!codigoScanner.trim()}
+            className="w-full rounded-lg bg-ledger py-2.5 text-sm font-bold text-paper disabled:opacity-50"
+          >
+            Adicionar ao carrinho
+          </button>
         </form>
       </Modal>
 

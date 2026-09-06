@@ -2,7 +2,6 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import type {
   AppData,
   Cliente,
-  CategoriaProduto,
   CompanyConfig,
   Conta,
   LancamentoManual,
@@ -16,7 +15,11 @@ import type {
 } from '../types';
 import {
   closeCashSessionRequest,
+  createCategoryRequest,
+  createProductRequest,
+  deleteCategoryRequest,
   deleteFixedExpenseRequest,
+  deleteProductRequest,
   openCashSessionRequest,
   payCreditRequest,
   payFixedExpenseRequest,
@@ -24,10 +27,14 @@ import {
   registerFixedExpenseRequest,
   registerSaleRequest,
   registerTransactionRequest,
+  reopenCashSessionRequest,
   resolveTransactionIdentificationRequest,
+  saveSettingsRequest,
+  updateCategoryRequest,
+  updateProductRequest,
   type SaleItemInput,
 } from '../lib/business';
-import { decodeToken, getStoredToken, TOKEN_KEY } from '../lib/auth';
+import { decodeToken, getStoredToken } from '../lib/auth';
 import {
   APP_DATA_CHANGED_EVENT,
   emptyData,
@@ -46,7 +53,7 @@ interface ResumoPeriodo {
 interface AppDataContextValue {
   data: AppData;
   loadedUserId: string | null;
-  setConfig: (config: CompanyConfig) => void;
+  setConfig: (config: CompanyConfig) => Promise<void>;
   addVenda: (venda: Omit<Venda, 'id'>, opts?: { clienteId?: string }) => void;
   /**
    * Atualiza uma venda existente. Retorna `false` (e não faz nada) quando a venda
@@ -62,12 +69,12 @@ interface AppDataContextValue {
    * apagar um recebimento que já aconteceu de fato.
    */
   removerVenda: (id: string) => boolean;
-  addProduto: (produto: Omit<Produto, 'id'>) => void;
-  atualizarProduto: (id: string, patch: Partial<Omit<Produto, 'id'>>) => void;
-  removerProduto: (id: string) => void;
-  addCategoria: (nome: string) => boolean;
-  editarCategoria: (id: string, nome: string) => boolean;
-  removerCategoria: (id: string) => void;
+  addProduto: (produto: Omit<Produto, 'id'>) => Promise<void>;
+  atualizarProduto: (id: string, patch: Partial<Omit<Produto, 'id'>>) => Promise<void>;
+  removerProduto: (id: string) => Promise<void>;
+  addCategoria: (nome: string) => Promise<boolean>;
+  editarCategoria: (id: string, nome: string) => Promise<boolean>;
+  removerCategoria: (id: string) => Promise<void>;
   addConta: (conta: Omit<Conta, 'id' | 'quitado'>) => void;
   editarConta: (id: string, patch: Partial<Omit<Conta, 'id'>>) => void;
   removerConta: (id: string) => void;
@@ -91,6 +98,8 @@ interface AppDataContextValue {
     id: string,
     classificacao: TipoEntrada | TipoDespesa,
     produtoId?: string,
+    quantidade?: number,
+    valorCorrigido?: number,
   ) => Promise<void>;
   cadastrarClienteNoBanco: (cliente: Omit<Cliente, 'id'>) => Promise<Cliente>;
   baixarFiado: (id: string, forma: Exclude<FormaPagamento, 'fiado'>) => Promise<void>;
@@ -103,6 +112,7 @@ interface AppDataContextValue {
   removerDespesaFixaNoBanco: (id: string) => Promise<void>;
   abrirCaixa: (valorInicial: number, responsavel?: string) => Promise<void>;
   fecharCaixa: (dinheiroContado: number, permitirPendencias?: boolean) => Promise<void>;
+  reabrirCaixa: (id: string) => Promise<void>;
   resetData: () => void;
   saldoCaixa: number;
   vendasHoje: number;
@@ -148,18 +158,10 @@ function dataLocalISO(instante?: string): string | undefined {
 }
 
 function mesclarDadosDoBanco(prev: AppData, serverData: AppData): AppData {
-  const configLocal = prev.config;
-  const configServidor = serverData.config;
   return {
     ...emptyData,
     ...serverData,
-    config: configLocal
-      ? {
-          ...configLocal,
-          despesasFixas: configServidor?.despesasFixas ?? configLocal.despesasFixas,
-          onboardingConcluido: configServidor?.onboardingConcluido ?? configLocal.onboardingConcluido,
-        }
-      : configServidor,
+    config: serverData.config ?? prev.config,
   };
 }
 
@@ -232,12 +234,6 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const handleStorageChange = (event: StorageEvent) => {
       if (event.storageArea !== localStorage) return;
       const userId = getAuthenticatedUserId();
-      if (event.key === TOKEN_KEY) {
-        activeUserIdRef.current = userId;
-        setLoadedUserId(userId);
-        setData(userId ? loadData(userId) : emptyData);
-        return;
-      }
       if (event.key !== null && event.key !== storageKeyForUser(userId)) return;
       setData(loadData(userId));
     };
@@ -246,8 +242,15 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  const setConfig = (config: CompanyConfig) => {
+  const aplicarDadosDoBanco = (serverData: AppData) => {
+    setData((prev) => mesclarDadosDoBanco(prev, serverData));
+  };
+
+  const setConfig = async (config: CompanyConfig) => {
     setData((prev) => ({ ...prev, config }));
+    if (!activeUserIdRef.current) return;
+    const response = await saveSettingsRequest(config);
+    aplicarDadosDoBanco(response.data);
   };
 
   const addVenda = (venda: Omit<Venda, 'id'>, opts?: { clienteId?: string }) => {
@@ -367,45 +370,53 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return true;
   };
 
-  const addProduto = (produto: Omit<Produto, 'id'>) => {
-    setData((prev) => ({ ...prev, produtos: [...prev.produtos, { ...produto, id: uid() }] }));
+  const addProduto = async (produto: Omit<Produto, 'id'>) => {
+    if (!activeUserIdRef.current) {
+      setData((prev) => ({
+        ...prev,
+        produtos: [...prev.produtos, { ...produto, id: uid(), createdAt: produto.createdAt ?? new Date().toISOString() }],
+      }));
+      return;
+    }
+    const response = await createProductRequest(produto);
+    aplicarDadosDoBanco(response.data);
   };
 
-  const atualizarProduto = (id: string, patch: Partial<Omit<Produto, 'id'>>) => {
-    setData((prev) => ({
-      ...prev,
-      produtos: prev.produtos.map((p) => (p.id === id ? { ...p, ...patch } : p)),
-    }));
+  const atualizarProduto = async (id: string, patch: Partial<Omit<Produto, 'id'>>) => {
+    if (!activeUserIdRef.current) {
+      setData((prev) => ({ ...prev, produtos: prev.produtos.map((item) => item.id === id ? { ...item, ...patch } : item) }));
+      return;
+    }
+    const response = await updateProductRequest(id, patch);
+    aplicarDadosDoBanco(response.data);
   };
 
-  const removerProduto = (id: string) => {
-    setData((prev) => ({
-      ...prev,
-      produtos: prev.produtos.filter((p) => p.id !== id),
-      vendas: prev.vendas.map((v) =>
-        v.produtoId === id
-          ? {
-              ...v,
-              produtoId: undefined,
-            }
-          : v,
-      ),
-    }));
+  const removerProduto = async (id: string) => {
+    if (!activeUserIdRef.current) {
+      setData((prev) => ({ ...prev, produtos: prev.produtos.filter((item) => item.id !== id) }));
+      return;
+    }
+    const response = await deleteProductRequest(id);
+    aplicarDadosDoBanco(response.data);
   };
 
-  const addCategoria = (nome: string): boolean => {
+  const addCategoria = async (nome: string): Promise<boolean> => {
     const nomeNormalizado = nome.trim();
     if (!nomeNormalizado) return false;
     const categorias = data.categorias ?? [];
     if (categorias.some((categoria) => categoria.nome.toLocaleLowerCase('pt-BR') === nomeNormalizado.toLocaleLowerCase('pt-BR'))) {
       return false;
     }
-    const novaCategoria: CategoriaProduto = { id: uid(), nome: nomeNormalizado };
-    setData((prev) => ({ ...prev, categorias: [...(prev.categorias ?? []), novaCategoria] }));
+    if (!activeUserIdRef.current) {
+      setData((prev) => ({ ...prev, categorias: [...(prev.categorias ?? []), { id: uid(), nome: nomeNormalizado }] }));
+      return true;
+    }
+    const response = await createCategoryRequest(nomeNormalizado);
+    aplicarDadosDoBanco(response.data);
     return true;
   };
 
-  const editarCategoria = (id: string, nome: string): boolean => {
+  const editarCategoria = async (id: string, nome: string): Promise<boolean> => {
     const nomeNormalizado = nome.trim();
     const categorias = data.categorias ?? [];
     const categoriaAtual = categorias.find((categoria) => categoria.id === id);
@@ -420,28 +431,33 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       return false;
     }
 
-    setData((prev) => ({
-      ...prev,
-      categorias: (prev.categorias ?? []).map((categoria) =>
-        categoria.id === id ? { ...categoria, nome: nomeNormalizado } : categoria,
-      ),
-      produtos: prev.produtos.map((produto) =>
-        produto.categoria === categoriaAtual.nome ? { ...produto, categoria: nomeNormalizado } : produto,
-      ),
-    }));
+    if (!activeUserIdRef.current) {
+      setData((prev) => ({
+        ...prev,
+        categorias: (prev.categorias ?? []).map((item) => item.id === id ? { ...item, nome: nomeNormalizado } : item),
+        produtos: prev.produtos.map((produto) => produto.categoria === categoriaAtual.nome ? { ...produto, categoria: nomeNormalizado } : produto),
+      }));
+      return true;
+    }
+
+    const response = await updateCategoryRequest(id, nomeNormalizado);
+    aplicarDadosDoBanco(response.data);
     return true;
   };
 
-  const removerCategoria = (id: string) => {
+  const removerCategoria = async (id: string) => {
     const categoriaAtual = (data.categorias ?? []).find((categoria) => categoria.id === id);
     if (!categoriaAtual) return;
-    setData((prev) => ({
-      ...prev,
-      categorias: (prev.categorias ?? []).filter((categoria) => categoria.id !== id),
-      produtos: prev.produtos.map((produto) =>
-        produto.categoria === categoriaAtual.nome ? { ...produto, categoria: undefined } : produto,
-      ),
-    }));
+    if (!activeUserIdRef.current) {
+      setData((prev) => ({
+        ...prev,
+        categorias: (prev.categorias ?? []).filter((item) => item.id !== id),
+        produtos: prev.produtos.map((produto) => produto.categoria === categoriaAtual.nome ? { ...produto, categoria: undefined } : produto),
+      }));
+      return;
+    }
+    const response = await deleteCategoryRequest(id);
+    aplicarDadosDoBanco(response.data);
   };
 
   const addConta = (conta: Omit<Conta, 'id' | 'quitado'>) => {
@@ -518,10 +534,6 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     }));
   };
 
-  const aplicarDadosDoBanco = (serverData: AppData) => {
-    setData((prev) => mesclarDadosDoBanco(prev, serverData));
-  };
-
   const registrarVendaNoBanco = async (items: SaleItemInput[], forma: FormaPagamento, clienteId?: string) => {
     const response = await registerSaleRequest(items, forma, clienteId);
     aplicarDadosDoBanco(response.data);
@@ -544,8 +556,16 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     id,
     classificacao,
     produtoId,
+    quantidade,
+    valorCorrigido,
   ) => {
-    const response = await resolveTransactionIdentificationRequest(id, classificacao, produtoId);
+    const response = await resolveTransactionIdentificationRequest(
+      id,
+      classificacao,
+      produtoId,
+      quantidade,
+      valorCorrigido,
+    );
     aplicarDadosDoBanco(response.data);
   };
 
@@ -587,6 +607,11 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const fecharCaixa = async (dinheiroContado: number, permitirPendencias = false) => {
     if (!data.caixaAtual) throw new Error('Nenhum caixa aberto.');
     const response = await closeCashSessionRequest(data.caixaAtual.id, dinheiroContado, permitirPendencias);
+    aplicarDadosDoBanco(response.data);
+  };
+
+  const reabrirCaixa = async (id: string) => {
+    const response = await reopenCashSessionRequest(id);
     aplicarDadosDoBanco(response.data);
   };
 
@@ -788,6 +813,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     removerDespesaFixaNoBanco,
     abrirCaixa,
     fecharCaixa,
+    reabrirCaixa,
     resetData,
     saldoCaixa,
     vendasHoje,

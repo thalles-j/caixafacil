@@ -4,22 +4,27 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
+  CaretDown,
   CheckCircle,
   CreditCard,
   ListBullets,
   LockKey,
   Money,
+  Plus,
   QrCode,
   Receipt,
   WarningCircle,
 } from '@phosphor-icons/react';
 import PendingIdentificationList from '../components/PendingIdentificationList';
+import Pagination from '../components/Pagination';
 import { useAppData } from '../context/AppDataContext';
 import { formatCurrency, parseMoney, sanitizeMoneyInput, todayISO } from '../lib/format';
 import { obterMovimentacoesFinanceiras, obterVendas } from '../lib/movements';
 import { TIPOS_DESPESA } from '../types';
 import type { FormaPagamento, TipoDespesa, TipoEntrada } from '../types';
 import type { Movimentacao } from '../lib/movements';
+import { paginateItems } from '../lib/pagination';
+import { defaultEntryType, entryTypeOptionsForOffer } from '../lib/offering';
 
 type FormaLancamento = Exclude<FormaPagamento, 'fiado' | 'cartao_debito'>;
 type EtapaFechamento = 'conferencia' | 'pendencias' | 'confirmacao';
@@ -30,32 +35,33 @@ const FORMAS: ReadonlyArray<{ valor: FormaLancamento; label: string; Icon: typeo
   { valor: 'cartao_credito', label: 'Cartão', Icon: CreditCard },
 ];
 
-const TIPOS_ENTRADA: ReadonlyArray<{ valor: TipoEntrada; label: string }> = [
-  { valor: 'produto', label: 'Produto' },
-  { valor: 'servico', label: 'Serviço' },
-  { valor: 'gorjeta', label: 'Gorjeta' },
-];
-
 const horario = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
 export default function FecharCaixa() {
   const navigate = useNavigate();
   const { data, registrarLancamentoNoBanco, fecharCaixa } = useAppData();
   const caixa = data.caixaAtual;
+  const oferta = data.config?.oferta ?? 'ambos';
+  const opcoesTipoEntrada = entryTypeOptionsForOffer(oferta);
+  const tipoEntradaPadrao = defaultEntryType(oferta);
 
   const [tipoLancamento, setTipoLancamento] = useState<'entrada' | 'saida'>('entrada');
   const [valorLancamento, setValorLancamento] = useState('');
   const [descricaoLancamento, setDescricaoLancamento] = useState('');
-  const [tipoEntrada, setTipoEntrada] = useState<TipoEntrada>('produto');
+  const [tipoEntrada, setTipoEntrada] = useState<TipoEntrada>(tipoEntradaPadrao);
   const [tipoDespesa, setTipoDespesa] = useState<TipoDespesa | ''>('');
   const [formaPagamento, setFormaPagamento] = useState<FormaLancamento>('dinheiro');
   const [salvandoLancamento, setSalvandoLancamento] = useState(false);
   const [erroLancamento, setErroLancamento] = useState<string | null>(null);
+  const [miniCaixaAberto, setMiniCaixaAberto] = useState(false);
 
   const [dinheiroContado, setDinheiroContado] = useState('');
   const [etapa, setEtapa] = useState<EtapaFechamento>('conferencia');
   const [fechando, setFechando] = useState(false);
   const [erroFechamento, setErroFechamento] = useState<string | null>(null);
+  const tipoEntradaEfetivo = opcoesTipoEntrada.some((opcao) => opcao.valor === tipoEntrada)
+    ? tipoEntrada
+    : tipoEntradaPadrao;
 
   const hoje = todayISO();
   const pendencias = useMemo(
@@ -119,14 +125,16 @@ export default function FecharCaixa() {
         descricao,
         valor,
         formaPagamento,
-        tipoEntrada: tipoLancamento === 'entrada' ? tipoEntrada : undefined,
+        tipoEntrada: tipoLancamento === 'entrada' ? tipoEntradaEfetivo : undefined,
         tipoDespesa: tipoLancamento === 'saida' ? tipoDespesa || undefined : undefined,
         movimentoCaixa: 'regular',
       });
       setValorLancamento('');
       setDescricaoLancamento('');
       setTipoDespesa('');
+      setTipoEntrada(tipoEntradaPadrao);
       setEtapa('conferencia');
+      setMiniCaixaAberto(false);
     } catch (error) {
       setErroLancamento(error instanceof Error ? error.message : 'Não foi possível salvar o lançamento.');
     } finally {
@@ -196,27 +204,61 @@ export default function FecharCaixa() {
           </section>
 
           <section className="order-2 min-w-0 rounded-2xl border border-line bg-paper-raised p-4 shadow-sm sm:p-5">
-            <div className="mb-4">
-              <h3 className="font-display text-lg font-bold text-ink">Mini caixa</h3>
-              <p className="mt-1 text-xs text-ink-soft">Adicione uma entrada ou despesa esquecida antes de concluir.</p>
-            </div>
+            <button
+              type="button"
+              onClick={() => setMiniCaixaAberto((aberto) => !aberto)}
+              aria-expanded={miniCaixaAberto}
+              aria-controls="formulario-mini-caixa"
+              className={`mini-cash-toggle flex w-full items-center justify-between gap-3 rounded-xl border border-transparent px-2 py-2 text-left text-ink hover:text-ledger-strong dark:hover:text-ledger ${
+                miniCaixaAberto ? 'open' : ''
+              }`}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-ledger/10 text-ledger-strong dark:text-ledger">
+                  <Plus
+                    size={20}
+                    weight="bold"
+                    className={`transition-transform duration-300 ${miniCaixaAberto ? 'rotate-45' : ''}`}
+                  />
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-display text-lg font-bold">
+                    {miniCaixaAberto ? 'Fechar mini caixa' : 'Abrir mini caixa'}
+                  </span>
+                  <span className="mt-0.5 block text-xs font-normal text-ink-soft">
+                    Adicione uma entrada ou despesa esquecida.
+                  </span>
+                </span>
+              </span>
+              <CaretDown
+                size={19}
+                className={`shrink-0 text-ink-soft transition-transform duration-300 ${miniCaixaAberto ? 'rotate-180' : ''}`}
+              />
+            </button>
 
-            <form className="min-w-0 space-y-4" onSubmit={salvarLancamento}>
+            <div
+              id="formulario-mini-caixa"
+              aria-hidden={!miniCaixaAberto}
+              inert={!miniCaixaAberto}
+              className={`collapsible-panel ${miniCaixaAberto ? 'open' : ''}`}
+            >
+              <div>
+            <form className="min-w-0 space-y-4 pt-4" onSubmit={salvarLancamento}>
               <div
                 data-selected={tipoLancamento}
                 data-choice-position={tipoLancamento === 'saida' ? 'second' : 'first'}
-                className="sliding-choice entry-exit-choice grid grid-cols-2 rounded-xl bg-line/40 p-1"
+                className="segmented-slider segmented-slider-2 entry-exit-selector grid grid-cols-2 rounded-xl border border-line bg-line/40 p-1"
               >
                 {(['entrada', 'saida'] as const).map((tipo) => (
                   <button
                     key={tipo}
                     type="button"
-                    data-selected={tipoLancamento === tipo}
+                    aria-pressed={tipoLancamento === tipo}
                     onClick={() => {
                       setTipoLancamento(tipo);
                       setErroLancamento(null);
                     }}
-                    className={`choice-option flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold ${
+                    className={`selection-option flex items-center justify-center gap-1.5 rounded-lg border-0 px-3 py-2 text-sm font-semibold ${
                       tipoLancamento === tipo
                         ? tipo === 'entrada'
                           ? 'bg-paper-raised text-ledger-strong shadow-sm dark:text-ledger'
@@ -252,7 +294,15 @@ export default function FecharCaixa() {
                     value={descricaoLancamento}
                     onChange={(event) => setDescricaoLancamento(event.target.value)}
                     type="text"
-                    placeholder={tipoLancamento === 'entrada' ? 'Ex: Venda rápida' : 'Ex: Compra emergencial'}
+                    placeholder={
+                      tipoLancamento === 'entrada'
+                        ? tipoEntradaEfetivo === 'servico'
+                          ? 'Ex: Atendimento realizado'
+                          : tipoEntradaEfetivo === 'gorjeta'
+                            ? 'Ex: Gorjeta recebida'
+                            : 'Ex: Venda rápida'
+                        : 'Ex: Compra emergencial'
+                    }
                     required={tipoLancamento === 'entrada' || !tipoDespesa}
                     className="w-full rounded-xl border border-line bg-paper px-3 py-3 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-ledger/30"
                   />
@@ -262,21 +312,24 @@ export default function FecharCaixa() {
               {tipoLancamento === 'entrada' ? (
                 <fieldset>
                   <legend className="mb-2 text-[10px] font-bold uppercase tracking-wide text-ink-soft">Tipo da entrada</legend>
-                  <div className="grid grid-cols-3 gap-2">
-                    {TIPOS_ENTRADA.map((tipo) => (
+                  <div className={`grid gap-2 ${opcoesTipoEntrada.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                    {opcoesTipoEntrada.map((tipo) => (
                       <button
                         key={tipo.valor}
                         type="button"
-                        data-selected={tipoEntrada === tipo.valor}
+                        aria-pressed={tipoEntradaEfetivo === tipo.valor}
+                        data-tone={tipo.valor}
                         onClick={() => setTipoEntrada(tipo.valor)}
-                        className={`choice-option rounded-lg border px-2 py-2 text-xs font-semibold ${tipoEntrada === tipo.valor ? 'border-ledger bg-ledger/10 text-ledger-strong dark:text-ledger' : 'border-line text-ink-soft'}`}
+                        className={`selection-option rounded-lg border px-2 py-2 text-xs font-semibold ${tipoEntradaEfetivo === tipo.valor ? 'border-ledger bg-ledger/10 text-ledger-strong dark:text-ledger' : 'border-line text-ink-soft'}`}
                       >
                         {tipo.label}
                       </button>
                     ))}
                   </div>
-                  <p className={`mt-2 text-xs ${tipoEntrada === 'gorjeta' ? 'text-ledger-strong dark:text-ledger' : 'text-brass'}`}>
-                    {tipoEntrada === 'gorjeta' ? 'Gorjeta entra sem pendência.' : 'Produto ou serviço ficará pendente até a confirmação.'}
+                  <p className={`mt-2 text-xs ${tipoEntradaEfetivo === 'gorjeta' ? 'text-ledger-strong dark:text-ledger' : 'text-brass'}`}>
+                    {tipoEntradaEfetivo === 'gorjeta'
+                      ? 'Gorjeta entra sem pendência.'
+                      : `${tipoEntradaEfetivo === 'produto' ? 'Produto' : 'Serviço'} ficará pendente até a confirmação.`}
                   </p>
                 </fieldset>
               ) : (
@@ -302,9 +355,9 @@ export default function FecharCaixa() {
                     <button
                       key={valor}
                       type="button"
-                      data-selected={formaPagamento === valor}
+                      aria-pressed={formaPagamento === valor}
                       onClick={() => setFormaPagamento(valor)}
-                      className={`choice-option flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-xs font-semibold ${formaPagamento === valor ? 'border-ledger bg-ledger/10 text-ledger-strong dark:text-ledger' : 'border-line text-ink-soft'}`}
+                      className={`selection-option flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-xs font-semibold ${formaPagamento === valor ? 'border-ledger bg-ledger/10 text-ledger-strong dark:text-ledger' : 'border-line text-ink-soft'}`}
                     >
                       <Icon size={15} /> {label}
                     </button>
@@ -321,6 +374,8 @@ export default function FecharCaixa() {
                 {salvandoLancamento ? 'Salvando…' : `Adicionar ${tipoLancamento === 'entrada' ? 'entrada' : 'despesa'}`}
               </button>
             </form>
+              </div>
+            </div>
           </section>
 
           <section className="order-4 min-w-0 rounded-2xl border border-line bg-paper-raised p-4 shadow-sm sm:p-5 lg:order-3">
@@ -394,8 +449,10 @@ export default function FecharCaixa() {
                 <div className="flex items-start gap-2">
                   <LockKey size={21} className="shrink-0 text-stamp" weight="fill" />
                   <div>
-                    <p className="text-sm font-semibold text-stamp">Confirmar fechamento definitivo?</p>
-                    <p className="mt-1 text-xs text-ink-soft">Depois disso, novas vendas e movimentações não poderão ser registradas neste caixa.</p>
+                    <p className="text-sm font-semibold text-stamp">Confirmar fechamento?</p>
+                    <p className="mt-1 text-xs text-ink-soft">
+                      Revise o dinheiro contado. Se ainda encontrar um erro, somente este último fechamento poderá ser reaberto antes da abertura de outro caixa.
+                    </p>
                   </div>
                 </div>
                 <div className="mt-3 flex flex-col gap-2 min-[400px]:flex-row">
@@ -434,6 +491,9 @@ function MovimentosDoDia({
   movimentacoes: Movimentacao[];
   totais: { entradas: number; saidas: number; fiado: number };
 }) {
+  const [pagina, setPagina] = useState(1);
+  const movimentacoesPaginadas = paginateItems(movimentacoes, pagina);
+
   return (
     <aside className="order-3 min-w-0 rounded-2xl border border-line bg-paper-raised shadow-sm lg:order-none lg:sticky lg:top-20">
       <div className="border-b border-line p-4 sm:p-5">
@@ -457,8 +517,9 @@ function MovimentosDoDia({
           <p className="text-sm font-medium text-ink">Nenhuma movimentação hoje.</p>
         </div>
       ) : (
+        <>
         <ul className="divide-y divide-line lg:max-h-[calc(100vh-18rem)] lg:overflow-y-auto">
-          {movimentacoes.map((movimento, index) => {
+          {movimentacoesPaginadas.items.map((movimento, index) => {
             const fiado = movimento.formaPagamento === 'fiado';
             const entrada = movimento.tipo === 'entrada';
             const detalhe = movimento.origem === 'conta' && !entrada
@@ -483,6 +544,15 @@ function MovimentosDoDia({
             );
           })}
         </ul>
+        <div className="px-3 pb-3">
+          <Pagination
+            currentPage={movimentacoesPaginadas.currentPage}
+            totalItems={movimentacoes.length}
+            onPageChange={setPagina}
+            itemLabel="movimentações"
+          />
+        </div>
+        </>
       )}
     </aside>
   );

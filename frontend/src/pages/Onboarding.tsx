@@ -104,20 +104,19 @@ export default function Onboarding() {
         ? 'mensal'
         : 'nenhum';
 
-    setConfig({
-      nome: nome.trim(),
-      categoria,
-      oferta,
-      controlaEstoque: oferta !== 'servicos',
-      despesasFixas,
-      relatorio: { frequencia, porEmail: false },
-      viewPeriod,
-      onboardingConcluido: true,
-    });
-
     setConcluindo(true);
     setConclusaoErro(null);
     try {
+      await setConfig({
+        nome: nome.trim(),
+        categoria,
+        oferta,
+        controlaEstoque: oferta !== 'servicos',
+        despesasFixas: [],
+        relatorio: { frequencia, porEmail: false },
+        viewPeriod,
+        onboardingConcluido: true,
+      });
       for (const despesa of despesasFixas) {
         await cadastrarDespesaFixaNoBanco({
           nome: despesa.nome,
@@ -183,8 +182,8 @@ export default function Onboarding() {
                         key={ramo}
                         type="button"
                         onClick={() => setCategoria(ramo)}
-                        data-selected={selecionado}
-                        className={`choice-option flex flex-col items-center gap-2 rounded-2xl border-2 p-3 text-center ${
+                        aria-pressed={selecionado}
+                        className={`selection-option flex flex-col items-center gap-2 rounded-2xl border-2 p-3 text-center ${
                           selecionado ? 'border-ledger bg-ledger/10' : 'border-line bg-paper'
                         }`}
                       >
@@ -212,8 +211,8 @@ export default function Onboarding() {
                     key={valor}
                     type="button"
                     onClick={() => selecionarOferta(valor)}
-                    data-selected={oferta === valor}
-                    className={`choice-option w-full rounded-xl border-2 px-4 py-3 text-left text-sm font-medium ${
+                    aria-pressed={oferta === valor}
+                    className={`selection-option w-full rounded-xl border-2 px-4 py-3 text-left text-sm font-medium ${
                       oferta === valor ? 'border-ledger bg-ledger/10 text-ledger-strong' : 'border-line bg-paper text-ink'
                     }`}
                   >
@@ -242,8 +241,8 @@ export default function Onboarding() {
                       type="button"
                       onClick={() => setNovaDespesaNome(sugestao)}
                       title={`Usar ${sugestao}`}
-                      data-selected={novaDespesaNome === sugestao}
-                      className={`choice-option flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-xs font-semibold ${
+                      aria-pressed={novaDespesaNome === sugestao}
+                      className={`selection-option flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-xs font-semibold ${
                         novaDespesaNome === sugestao
                           ? 'border-ledger bg-ledger/10 text-ledger-strong'
                           : 'border-line bg-paper text-ink-soft hover:border-ledger/40 hover:text-ink'
@@ -287,7 +286,7 @@ export default function Onboarding() {
                   <legend className="mb-2 text-[10px] font-bold uppercase tracking-wide text-ink-soft">Com que frequência?</legend>
                   <div
                     data-choice-position={novaDespesaRecorrencia === 'semanal' ? 'second' : 'first'}
-                    className="sliding-choice grid grid-cols-2 rounded-xl bg-line/40 p-1"
+                    className="segmented-slider segmented-slider-2 grid grid-cols-2 rounded-xl bg-line/40 p-1"
                   >
                     {([
                       ['mensal', 'Todo mês'],
@@ -298,7 +297,7 @@ export default function Onboarding() {
                         type="button"
                         aria-pressed={novaDespesaRecorrencia === recorrencia}
                         onClick={() => setNovaDespesaRecorrencia(recorrencia)}
-                        className={`choice-option rounded-xl border px-3 py-2.5 text-xs font-semibold ${
+                        className={`selection-option rounded-xl border px-3 py-2.5 text-xs font-semibold ${
                           novaDespesaRecorrencia === recorrencia
                             ? 'border-ledger bg-ledger/10 text-ledger-strong'
                             : 'border-line bg-paper-raised text-ink-soft'
@@ -374,13 +373,13 @@ export default function Onboarding() {
                 </label>
                 <div
                   data-choice-position={viewPeriod === 'week' ? 'second' : 'first'}
-                  className="sliding-choice grid grid-cols-2 rounded-xl bg-line/40 p-1"
+                  className="segmented-slider segmented-slider-2 grid grid-cols-2 rounded-xl bg-line/40 p-1"
                 >
                   <button
                     type="button"
+                    aria-pressed={viewPeriod === 'day'}
                     onClick={() => setViewPeriod('day')}
-                    data-selected={viewPeriod === 'day'}
-                    className={`choice-option flex-1 rounded-xl border-2 px-4 py-2 text-sm font-medium ${
+                    className={`selection-option flex-1 rounded-xl border-2 px-4 py-2 text-sm font-medium ${
                       viewPeriod === 'day' ? 'border-ledger bg-ledger/10 text-ledger-strong' : 'border-line bg-paper text-ink'
                     }`}
                   >
@@ -388,9 +387,9 @@ export default function Onboarding() {
                   </button>
                   <button
                     type="button"
+                    aria-pressed={viewPeriod === 'week'}
                     onClick={() => setViewPeriod('week')}
-                    data-selected={viewPeriod === 'week'}
-                    className={`choice-option flex-1 rounded-xl border-2 px-4 py-2 text-sm font-medium ${
+                    className={`selection-option flex-1 rounded-xl border-2 px-4 py-2 text-sm font-medium ${
                       viewPeriod === 'week' ? 'border-ledger bg-ledger/10 text-ledger-strong' : 'border-line bg-paper text-ink'
                     }`}
                   >

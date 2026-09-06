@@ -12,6 +12,7 @@ import {
   EyeSlash,
   FilePdf,
   HandCoins,
+  Headset,
   Package,
   Receipt,
   ShieldCheck,
@@ -118,6 +119,13 @@ export default function Landing() {
             >
               {dark ? <Sun size={18} /> : <Moon size={18} />}
             </button>
+            <Link
+              to="/suporte"
+              aria-label="Suporte"
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full px-2 text-sm font-medium text-ink-soft transition hover:bg-line/40 hover:text-ink sm:px-3"
+            >
+              <Headset size={18} /> <span className="hidden md:inline">Suporte</span>
+            </Link>
             <Link to="/login" className="text-sm font-medium text-ink-soft hover:text-ink">
               Entrar
             </Link>
@@ -181,7 +189,7 @@ export default function Landing() {
                   title={valoresDemonstracaoVisiveis ? 'Ocultar informações' : 'Mostrar informações'}
                   className="privacy-nudge flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#f7f1e4]/10 transition hover:bg-[#f7f1e4]/20"
                 >
-                  {valoresDemonstracaoVisiveis ? <EyeSlash size={18} /> : <Eye size={18} />}
+                  {valoresDemonstracaoVisiveis ? <Eye size={18} /> : <EyeSlash size={18} />}
                 </button>
               </div>
               <div className="flex gap-3">
@@ -319,9 +327,10 @@ export default function Landing() {
       <footer className="border-t border-line py-6">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-2 px-5 text-center text-xs text-ink-soft sm:flex-row sm:justify-between sm:text-left">
           <span>CaixaFácil — protótipo 1.0</span>
-          <Link to="/login" className="font-medium text-ink-soft hover:text-ink">
-            Entrar
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link to="/suporte" className="font-medium text-ink-soft hover:text-ink">Suporte</Link>
+            <Link to="/login" className="font-medium text-ink-soft hover:text-ink">Entrar</Link>
+          </div>
         </div>
       </footer>
     </div>

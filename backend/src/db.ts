@@ -1,4 +1,11 @@
 import { Pool } from 'pg';
+import { readFile } from 'node:fs/promises';
+
+const schemaUrls = [
+  new URL('../prisma/migrations/0001_init/migration.sql', import.meta.url),
+  new URL('../prisma/migrations/0002_admin_panel/migration.sql', import.meta.url),
+  new URL('../prisma/migrations/0003_admin_account_management/migration.sql', import.meta.url),
+];
 const configuredDatabaseUrl = process.env.DATABASE_URL;
 
 if (!configuredDatabaseUrl) {
@@ -43,6 +50,24 @@ export const pool = createPool(
   runtimeDatabaseUrl,
   positiveInteger(process.env.DB_POOL_MAX, 10),
 );
+
+export async function ensureSchema() {
+  const schemas = await Promise.all(schemaUrls.map((schemaUrl) => readFile(schemaUrl, 'utf8')));
+  // Se uma URL direta existir, ela e preferida para DDL. Caso contrario, o
+  // mesmo pool do runtime e usado; DATABASE_URL_UNPOOLED nao e obrigatoria.
+  const migrationDatabaseUrl = process.env.DATABASE_URL_UNPOOLED ?? runtimeDatabaseUrl;
+  if (migrationDatabaseUrl === runtimeDatabaseUrl) {
+    for (const schema of schemas) await pool.query(schema);
+    return;
+  }
+
+  const migrationPool = createPool(migrationDatabaseUrl, 1);
+  try {
+    for (const schema of schemas) await migrationPool.query(schema);
+  } finally {
+    await migrationPool.end();
+  }
+}
 
 /**
  * Executa operacoes autenticadas com o tenant preso a uma transacao.

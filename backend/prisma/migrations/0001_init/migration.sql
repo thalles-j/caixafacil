@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS users (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email         CITEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
+  token_version INTEGER NOT NULL DEFAULT 0 CONSTRAINT ck_users_token_version CHECK (token_version >= 0),
+  role          TEXT NOT NULL DEFAULT 'client' CONSTRAINT ck_users_role CHECK (role IN ('client', 'admin')),
+  status        TEXT NOT NULL DEFAULT 'active' CONSTRAINT ck_users_status CHECK (status IN ('active', 'suspended')),
   name          TEXT,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -58,6 +61,47 @@ ALTER TABLE users ALTER COLUMN id SET DEFAULT gen_random_uuid();
 ALTER TABLE users ALTER COLUMN email TYPE CITEXT USING email::CITEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE users ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'client';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_users_token_version') THEN
+    ALTER TABLE users ADD CONSTRAINT ck_users_token_version CHECK (token_version >= 0);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_users_role') THEN
+    ALTER TABLE users ADD CONSTRAINT ck_users_role CHECK (role IN ('client', 'admin'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_users_status') THEN
+    ALTER TABLE users ADD CONSTRAINT ck_users_status CHECK (status IN ('active', 'suspended'));
+  END IF;
+END;
+$$;
+
+CREATE INDEX IF NOT EXISTS idx_users_role_status_created
+  ON users (role, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS admin_audit_logs (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  admin_user_id  UUID REFERENCES users(id) ON DELETE SET NULL,
+  target_user_id UUID NOT NULL,
+  action         TEXT NOT NULL CHECK (action IN (
+    'client_suspended', 'client_activated', 'client_deleted',
+    'client_name_updated', 'client_password_reset',
+    'admin_name_updated', 'admin_password_changed'
+  )),
+  details        JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_audit_admin_created
+  ON admin_audit_logs (admin_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_target_created
+  ON admin_audit_logs (target_user_id, created_at DESC);
+
+COMMENT ON TABLE admin_audit_logs IS
+  'Registro imutavel das acoes administrativas sensiveis; nao e exposto a role de tenant.';
 
 COMMENT ON TABLE users IS
   'Contas autenticaveis. O hash e produzido pela API com bcrypt/argon2; senhas nunca sao armazenadas.';
@@ -82,6 +126,25 @@ CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expiry
 
 COMMENT ON TABLE password_reset_tokens IS
   'Tokens de uso unico e curta duracao para recuperar senhas sem expor se um e-mail possui conta.';
+
+CREATE TABLE IF NOT EXISTS business_settings (
+  user_id               UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  business_name         TEXT NOT NULL CHECK (btrim(business_name) <> ''),
+  business_category     TEXT NOT NULL CHECK (btrim(business_category) <> ''),
+  offering              TEXT NOT NULL DEFAULT 'ambos' CHECK (offering IN ('produtos', 'servicos', 'ambos')),
+  controls_stock        BOOLEAN NOT NULL DEFAULT true,
+  daily_sales_goal      NUMERIC(14,2) CHECK (daily_sales_goal IS NULL OR daily_sales_goal >= 0),
+  report_frequency      TEXT NOT NULL DEFAULT 'nenhum' CHECK (report_frequency IN ('semanal', 'mensal', 'ambos', 'nenhum')),
+  report_by_email       BOOLEAN NOT NULL DEFAULT false,
+  report_email          CITEXT,
+  view_period           TEXT NOT NULL DEFAULT 'day' CHECK (view_period IN ('day', 'week')),
+  onboarding_completed  BOOLEAN NOT NULL DEFAULT false,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE business_settings IS
+  'Preferencias e configuracoes do negocio, persistidas por conta no servidor.';
 
 -- ============================================================
 -- CATEGORIAS E PRODUTOS
@@ -110,6 +173,7 @@ CREATE TABLE IF NOT EXISTS products (
   kind              TEXT NOT NULL DEFAULT 'product'
                     CHECK (kind IN ('product', 'service')),
   name              TEXT NOT NULL CHECK (btrim(name) <> ''),
+  barcode           TEXT,
   sale_price        NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (sale_price >= 0),
   cost_price        NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (cost_price >= 0),
   stock_quantity    NUMERIC(14,3) CHECK (stock_quantity IS NULL OR stock_quantity >= 0),
@@ -128,6 +192,8 @@ CREATE TABLE IF NOT EXISTS products (
   )
 );
 
+ALTER TABLE products ADD COLUMN IF NOT EXISTS barcode TEXT;
+
 COMMENT ON TABLE products IS
   'Catalogo de produtos e servicos; estoque e precos pertencem sempre ao tenant.';
 COMMENT ON COLUMN products.category_id IS
@@ -139,6 +205,8 @@ CREATE INDEX IF NOT EXISTS idx_products_user_category
   ON products (user_id, category_id);
 CREATE INDEX IF NOT EXISTS idx_products_user_name
   ON products (user_id, lower(name));
+CREATE UNIQUE INDEX IF NOT EXISTS uq_products_user_barcode
+  ON products (user_id, barcode) WHERE barcode IS NOT NULL;
 
 -- ============================================================
 -- CLIENTES
@@ -491,7 +559,7 @@ DECLARE
   table_name TEXT;
 BEGIN
   FOREACH table_name IN ARRAY ARRAY[
-    'users', 'categories', 'products', 'customers', 'cash_sessions',
+    'users', 'business_settings', 'categories', 'products', 'customers', 'cash_sessions',
     'sales', 'fixed_expenses', 'credit_sales'
   ]
   LOOP
@@ -758,7 +826,7 @@ DECLARE
   table_name TEXT;
 BEGIN
   FOREACH table_name IN ARRAY ARRAY[
-    'categories', 'products', 'customers', 'cash_sessions', 'sales',
+    'business_settings', 'categories', 'products', 'customers', 'cash_sessions', 'sales',
     'sale_items', 'fixed_expenses', 'credit_sales', 'transactions'
   ]
   LOOP
@@ -851,7 +919,7 @@ COMMENT ON VIEW credit_receivables IS
 -- Privilegios minimos da role usada pela API depois de autenticar o usuario.
 GRANT USAGE ON SCHEMA public TO mnb_app_runtime;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
-  categories, products, customers, cash_sessions, sales, sale_items,
+  business_settings, categories, products, customers, cash_sessions, sales, sale_items,
   fixed_expenses, credit_sales, transactions
 TO mnb_app_runtime;
 GRANT SELECT ON daily_balance, cash_session_report, credit_receivables TO mnb_app_runtime;

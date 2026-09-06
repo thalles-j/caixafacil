@@ -93,4 +93,28 @@ describe('movimentações financeiras', () => {
     });
     expect(vendas[0]?.detalhe).toContain('identificação pendente');
   });
+
+  it('identifica gorjetas para o filtro de entradas', () => {
+    const vendas = obterVendas({
+      ...dados,
+      lancamentosManuais: [
+        {
+          id: 'gorjeta',
+          data: '2026-08-05',
+          tipo: 'entrada',
+          tipoEntrada: 'gorjeta',
+          descricao: 'Gorjeta do atendimento',
+          valor: 12,
+          formaPagamento: 'pix',
+        },
+      ],
+    });
+
+    expect(vendas[0]).toMatchObject({
+      id: 'gorjeta',
+      tipoEntrada: 'gorjeta',
+      itemType: undefined,
+    });
+    expect(vendas[0]?.detalhe).toContain('Gorjeta');
+  });
 });

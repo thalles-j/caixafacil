@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Catalogo from './Catalogo';
 
@@ -11,6 +11,7 @@ vi.mock('../context/AppDataContext', () => ({
     data: {
       config: { oferta: 'ambos' },
       categorias: [],
+      vendas: [],
       produtos: [
         {
           id: 'produto-1',
@@ -37,8 +38,10 @@ describe('modal de edição do Catálogo', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Editar' }));
       const modal = screen.getByRole('dialog', { name: 'Editar item' });
       expect(modal).toBeTruthy();
-      expect(modal.querySelector('.catalog-type-choice')?.getAttribute('data-selected')).toBe('service');
+      expect(within(modal).getByRole('button', { name: 'Serviço' }).getAttribute('aria-pressed')).toBe('true');
       expect(screen.getByPlaceholderText('Ex: 30 min')).toBeTruthy();
+      fireEvent.click(within(modal).getByRole('button', { name: 'Produto' }));
+      expect(within(modal).getByRole('button', { name: 'Produto' }).getAttribute('aria-pressed')).toBe('true');
       fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));
     }
 
