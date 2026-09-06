@@ -68,7 +68,7 @@ adminRouter.get('/stats', adminReadLimit, asyncRoute(async (_req, res) => {
        COUNT(*) FILTER (WHERE status = 'active')::integer AS active,
        COUNT(*) FILTER (WHERE status = 'suspended')::integer AS suspended,
        COUNT(*) FILTER (WHERE created_at >= now() - interval '30 days')::integer AS new_last_30_days
-     FROM users WHERE role = 'client'`,
+     FROM users WHERE role = 'client' AND account_kind = 'owner'`,
   );
   const row = result.rows[0];
   return res.json({
@@ -195,7 +195,7 @@ export const listClientsHandler: AsyncRoute = async (req, res) => {
   const pageSize = 15;
   const offset = (page - 1) * pageSize;
   const params = [search, status, pageSize, offset];
-  const where = `u.role = 'client'
+  const where = `u.role = 'client' AND u.account_kind = 'owner'
     AND ($1 = '' OR u.email ILIKE '%' || $1 || '%' OR COALESCE(bs.business_name, u.name, '') ILIKE '%' || $1 || '%')
     AND ($2 = 'all' OR u.status = $2)`;
   const [itemsResult, countResult] = await Promise.all([
@@ -242,7 +242,7 @@ export const clientDetailHandler: AsyncRoute = async (req, res) => {
             (SELECT COUNT(*)::integer FROM credit_sales cr WHERE cr.user_id = u.id AND cr.status <> 'pago') AS open_credits
      FROM users u
      LEFT JOIN business_settings bs ON bs.user_id = u.id
-     WHERE u.id = $1 AND u.role = 'client'`,
+     WHERE u.id = $1 AND u.role = 'client' AND u.account_kind = 'owner'`,
     [req.params.id],
   );
   if (!result.rowCount) return res.status(404).json({ error: 'Cliente não encontrado.' });
@@ -279,7 +279,7 @@ export const updateClientStatusHandler: AsyncRoute = async (req, res) => {
     const currentResult = await client.query(
       `SELECT u.id, u.email, u.name, u.status, bs.business_name
        FROM users u LEFT JOIN business_settings bs ON bs.user_id = u.id
-       WHERE u.id = $1 AND u.role = 'client' FOR UPDATE OF u`,
+       WHERE u.id = $1 AND u.role = 'client' AND u.account_kind = 'owner' FOR UPDATE OF u`,
       [req.params.id],
     );
     if (!currentResult.rowCount) {
@@ -320,7 +320,7 @@ export const updateClientNameHandler: AsyncRoute = async (req, res) => {
     const currentResult = await client.query(
       `SELECT u.id, u.email, u.name, bs.business_name
        FROM users u LEFT JOIN business_settings bs ON bs.user_id = u.id
-       WHERE u.id = $1 AND u.role = 'client' FOR UPDATE OF u`,
+       WHERE u.id = $1 AND u.role = 'client' AND u.account_kind = 'owner' FOR UPDATE OF u`,
       [req.params.id],
     );
     if (!currentResult.rowCount) {
@@ -369,7 +369,7 @@ export const resetClientPasswordHandler: AsyncRoute = async (req, res) => {
     const currentResult = await client.query(
       `SELECT u.id, u.email, u.name, bs.business_name
        FROM users u LEFT JOIN business_settings bs ON bs.user_id = u.id
-       WHERE u.id = $1 AND u.role = 'client' FOR UPDATE OF u`,
+       WHERE u.id = $1 AND u.role = 'client' AND u.account_kind = 'owner' FOR UPDATE OF u`,
       [req.params.id],
     );
     if (!currentResult.rowCount) {
@@ -414,7 +414,7 @@ export const deleteClientHandler: AsyncRoute = async (req, res) => {
     const currentResult = await client.query(
       `SELECT u.id, u.email, u.name, u.status, bs.business_name
        FROM users u LEFT JOIN business_settings bs ON bs.user_id = u.id
-       WHERE u.id = $1 AND u.role = 'client' FOR UPDATE OF u`,
+       WHERE u.id = $1 AND u.role = 'client' AND u.account_kind = 'owner' FOR UPDATE OF u`,
       [req.params.id],
     );
     if (!currentResult.rowCount) {
@@ -431,7 +431,7 @@ export const deleteClientHandler: AsyncRoute = async (req, res) => {
        VALUES ($1, $2, 'client_deleted', $3::jsonb)`,
       [adminId, req.params.id, JSON.stringify({ email: current.email, name: current.name, businessName: current.business_name, status: current.status })],
     );
-    await client.query(`DELETE FROM users WHERE id = $1 AND role = 'client'`, [req.params.id]);
+    await client.query(`DELETE FROM users WHERE id = $1 AND role = 'client' AND account_kind = 'owner'`, [req.params.id]);
     await client.query('COMMIT');
     return res.status(204).send();
   } catch (error) {

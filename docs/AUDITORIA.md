@@ -1,6 +1,6 @@
 # Auditoria atual do CaixaFácil
 
-Atualizada em 16 de agosto de 2026. Este documento descreve a arquitetura atual;
+Atualizada em 5 de setembro de 2026. Este documento descreve a arquitetura atual;
 ele substitui a auditoria histórica feita quando o projeto ainda era somente
 frontend.
 
@@ -19,14 +19,21 @@ frontend.
 ## Funcionalidades verificadas
 
 - Cadastro, login, logout, troca e recuperação de senha com token de uso único.
+- Papéis OWNER e OPERATOR por estabelecimento. O dono gerencia credenciais e
+  ativações; o operador acessa catálogo, caixa, clientes e vendas do caixa aberto,
+  inclusive devoluções confirmadas, sem relatórios,
+  configurações, backup ou administração da conta.
 - Painel `/admin` protegido por papel, com gestão de contas de clientes,
   alteração de nome, redefinição de senha, suspensão, exclusão, estatísticas
   agregadas e log de auditoria. Ações sensíveis exigem redigitar o nome alvo.
 - Onboarding para produtos, serviços ou ambos.
 - Catálogo com categorias, estoque, código de barras, ordenação e paginação.
 - Caixa, vendas à vista/fiado, baixa de estoque, clientes e fechamento corrigível.
+- Cupom não fiscal ESC/POS em 58/80 mm, pulso de gaveta, fallback HTML/PDF,
+  fila offline idempotente e estorno total ou parcial com recomposição atômica.
 - Entradas, saídas, gorjetas, pendências identificáveis, contas fixas e fiado.
-- Cobrança de fiado por WhatsApp quando o cliente possui telefone válido.
+- Cobrança de fiado por WhatsApp somente com consentimento explícito vigente;
+  anonimização de clientes preserva os agregados financeiros.
 - Relatórios e histórico, backup lógico completo da conta e restauração atômica.
 - Testes automatizados, TypeScript/lint e CI em `.github/workflows/`.
 
@@ -36,6 +43,10 @@ frontend.
   caracteres, uma maiúscula e um caractere especial.
 - Rotas sensíveis possuem rate limit, respostas de autenticação não ficam em
   cache e a API envia cabeçalhos de segurança.
+- Sessões de estabelecimento travam após o período configurado de inatividade;
+  o desbloqueio exige a senha do ator e preserva o carrinho local.
+- Logs JSON correlacionados e Sentry usam lista positiva sem corpos, tokens ou
+  dados pessoais. O monitor externo de `/api/health` possui alerta simulado.
 - O backup é validado por formato, versão e proprietário antes de substituir os
   dados, dentro de uma transação.
 - Frontend e backend podem ser hospedados em origens diferentes com CORS
@@ -49,6 +60,8 @@ frontend.
 ## Dependências externas e limites conhecidos
 
 - Produção exige configurar Neon, segredos JWT e um webhook/provedor de e-mail.
+- A entrega real do alerta de uptime exige URL pública e segredos no GitHub;
+  execute `workflow_dispatch` com `simulate_failure` antes do deploy.
 - Frequências semanal/mensal são preferências persistidas; disparo automático
   requer um agendador externo. O botão “Enviar agora” faz envio real pelo backend.
 - Leitura por câmera usa `BarcodeDetector` quando o navegador oferece suporte;
@@ -70,3 +83,5 @@ npm run build
 
 Depois, aplique o schema no Neon, valide `/api/health`, teste CORS/cookie entre
 as URLs públicas e execute um ciclo de exportação/restauração em conta de teste.
+Consulte `docs/PDV.md`, `docs/LGPD.md` e `docs/OBSERVABILIDADE.md` para os roteiros
+de homologação que dependem de hardware e serviços externos.

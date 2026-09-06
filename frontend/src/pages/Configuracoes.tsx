@@ -9,6 +9,8 @@ import {
   Moon,
   PaperPlaneTilt,
   Plus,
+  Timer,
+  UsersThree,
   ShieldCheck,
   SignOut,
   Sun,
@@ -33,6 +35,8 @@ import Modal from '../components/Modal';
 import Pagination from '../components/Pagination';
 import { paginateItems } from '../lib/pagination';
 import { sendReportEmailRequest } from '../lib/business';
+import ReceiptSettingsFields from '../components/ReceiptSettingsFields';
+import { DEFAULT_RECEIPT_SETTINGS } from '../lib/printing';
 
 export default function Configuracoes() {
   const { data, setConfig, resetData, cadastrarDespesaFixaNoBanco, removerDespesaFixaNoBanco } = useAppData();
@@ -158,7 +162,7 @@ export default function Configuracoes() {
         const parsed = JSON.parse(String(leitor.result));
         if (
           !parsed || parsed.format !== 'caixafacil-postgres-backup' ||
-          parsed.version !== 2 || typeof parsed.tables !== 'object'
+          parsed.version !== 3 || typeof parsed.tables !== 'object'
         ) {
           setImportErro('Arquivo inválido ou versão de backup não suportada.');
           return;
@@ -247,13 +251,48 @@ export default function Configuracoes() {
     'w-full rounded-lg border border-line bg-paper p-2 text-ink focus:outline-none focus:ring-2 focus:ring-ledger/30';
 
   return (
-    <div className="fade-in space-y-6 lg:grid lg:grid-cols-2 lg:gap-6 lg:space-y-0">
+    <div className="fade-in space-y-8 lg:grid lg:grid-cols-2 lg:gap-8 lg:space-y-0">
       <header className="lg:col-span-2">
         <h2 className="font-display text-2xl font-bold text-ink">Configurações</h2>
         <p className="mt-1 text-sm text-ink-soft">Organize sua conta, seu negócio e as preferências do CaixaFácil.</p>
       </header>
 
-      <section className="min-w-0 rounded-2xl border border-line bg-paper-raised p-4 shadow-sm sm:p-5 lg:col-span-2">
+      <section className="rounded-2xl border border-line bg-paper-raised p-5 shadow-sm sm:p-6">
+        <ReceiptSettingsFields value={config.receiptSettings ?? DEFAULT_RECEIPT_SETTINGS}
+          onChange={receiptSettings => salvarCampo({ receiptSettings })} />
+      </section>
+
+      <section className="rounded-2xl border border-line bg-paper-raised p-5 shadow-sm sm:p-6">
+        <div className="mb-5 flex items-start gap-3 border-b border-line pb-4">
+          <span className="rounded-xl bg-ledger/10 p-2.5 text-ledger-strong dark:text-ledger">
+            <Timer size={21} weight="duotone" />
+          </span>
+          <div>
+            <h3 className="font-display text-lg font-bold text-ink">Sessão e equipe</h3>
+            <p className="mt-1 text-xs text-ink-soft">Defina o bloqueio do terminal e gerencie quem pode operar o caixa.</p>
+          </div>
+        </div>
+        <div className="space-y-5">
+          <label className="block text-sm font-semibold text-ink">Bloquear por inatividade
+            <span className="mt-1 block text-xs font-normal text-ink-soft">Tempo sem atividade antes de exigir a senha novamente.</span>
+            <div className="mt-3 flex items-center gap-2">
+              <input type="number" min={1} max={120} value={config.idleTimeoutMinutes ?? 15}
+                onChange={event => salvarCampo({ idleTimeoutMinutes: Math.max(1, Math.min(120, Number(event.target.value))) })}
+                className="w-24 rounded-lg border border-line bg-paper px-3 py-2.5 text-ink focus:outline-none focus:ring-2 focus:ring-ledger/30" />
+              <span className="text-sm text-ink-soft">minutos</span>
+            </div>
+          </label>
+          <Link to="/operadores" className="flex items-center justify-between gap-4 rounded-xl border border-line bg-paper px-4 py-3 transition hover:border-ledger/30 hover:bg-ledger/5">
+            <span className="flex items-center gap-3">
+              <UsersThree size={21} className="text-ledger" />
+              <span><strong className="block text-sm text-ink">Gerenciar operadores</strong><span className="text-xs text-ink-soft">Credenciais e acesso da equipe</span></span>
+            </span>
+            <ArrowRight size={17} className="shrink-0 text-ink-soft" />
+          </Link>
+        </div>
+      </section>
+
+      <section className="min-w-0 rounded-2xl border border-line bg-paper-raised p-5 shadow-sm sm:p-6 lg:col-span-2">
         <div className="mb-4 flex items-start gap-3 border-b border-line pb-4">
           <span className="rounded-xl bg-ledger/10 p-2.5 text-ledger-strong dark:text-ledger">
             <ShieldCheck size={21} weight="duotone" />
@@ -347,7 +386,7 @@ export default function Configuracoes() {
 
       <section className="min-w-0 rounded-2xl border border-line bg-paper-raised p-4 shadow-sm">
         <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-ink-soft">Negócio</h3>
-        <div className="space-y-4">
+        <div className="space-y-5">
           <div>
             <label className="mb-1 block text-xs font-medium text-ink-soft">Nome do Negócio</label>
             <input
@@ -416,7 +455,7 @@ export default function Configuracoes() {
         </div>
       </section>
 
-      <div className="min-w-0 space-y-6">
+      <div className="min-w-0 space-y-8">
         <section className="rounded-2xl border border-line bg-paper-raised p-4 shadow-sm">
           <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-ink-soft">Aparência</h3>
           <label className="flex items-center justify-between gap-3">
@@ -518,7 +557,7 @@ export default function Configuracoes() {
         <section className="rounded-2xl border border-line bg-paper-raised p-4 shadow-sm">
           <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-ink-soft">Relatórios</h3>
           {configErro && <p role="alert" className="mb-3 text-xs font-medium text-stamp">{configErro}</p>}
-          <div className="space-y-4">
+          <div className="space-y-5">
             <div>
               <label className="mb-1 block text-xs font-medium text-ink-soft">Frequência</label>
               <select

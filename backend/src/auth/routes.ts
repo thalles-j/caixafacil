@@ -6,6 +6,10 @@ import { hashPassword, comparePassword, passwordValidationError } from './passwo
 import { signRefreshToken, signToken, verifyRefreshToken, verifyToken } from './jwt.js';
 import { rateLimit } from '../security.js';
 import { sendEmail } from '../email.js';
+import { activeUser, createSession, publicUser, sessionUser, tokenPayload, validateSession } from './session.js';
+import type { TokenPayload } from './jwt.js';
+import { loadOperatorData } from '../tenant/data.js';
+import { logEvent } from '../observability.js';
 
 export const authRouter = Router();
 
@@ -29,8 +33,8 @@ function refreshCookieOptions() {
   };
 }
 
-function setRefreshCookie(res: Response, user: { id: string; email: string; tokenVersion: number; role: 'client' | 'admin' }) {
-  res.cookie(REFRESH_COOKIE, signRefreshToken({ sub: user.id, email: user.email, ver: user.tokenVersion, role: user.role }), {
+function setRefreshCookie(res: Response, payload: TokenPayload) {
+  res.cookie(REFRESH_COOKIE, signRefreshToken(payload), {
     ...refreshCookieOptions(),
     maxAge: REFRESH_MAX_AGE_MS,
   });
@@ -95,7 +99,8 @@ authRouter.post('/register', registerLimit, asyncRoute(async (req, res) => {
   const id = crypto.randomUUID();
   const passwordHash = await hashPassword(password);
   try {
-    await pool.query('INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)', [
+    await pool.query(`WITH created AS (INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3) RETURNING id)
+      INSERT INTO tenant_memberships(actor_id,user_id,role) SELECT id,id,'OWNER' FROM created`, [
       id,
       normalizedEmail,
       passwordHash,
@@ -108,9 +113,10 @@ authRouter.post('/register', registerLimit, asyncRoute(async (req, res) => {
     throw error;
   }
 
-  const token = signToken({ sub: id, email: normalizedEmail, ver: 0, role: 'client' });
-  setRefreshCookie(res, { id, email: normalizedEmail, tokenVersion: 0, role: 'client' });
-  res.status(201).json({ token, user: { id, email: normalizedEmail, role: 'client' } });
+  const user = (await sessionUser(id))!;
+  const payload = await createSession(user);
+  setRefreshCookie(res, payload);
+  res.status(201).json({ token: signToken(payload), user: publicUser(user) });
 }));
 
 authRouter.post('/forgot-password', forgotPasswordLimit, asyncRoute(async (req, res) => {
@@ -153,7 +159,7 @@ authRouter.post('/forgot-password', forgotPasswordLimit, asyncRoute(async (req, 
 
   const frontendUrl = (process.env.FRONTEND_URL ?? '').replace(/\/$/, '');
   if (!frontendUrl) {
-    console.error('FRONTEND_URL ausente: recuperação de senha não enviada.');
+    logEvent('error', 'configuration_error', { error_name: 'Error' });
     return res.json({ message: RECOVERY_MESSAGE });
   }
   try {
@@ -164,10 +170,10 @@ authRouter.post('/forgot-password', forgotPasswordLimit, asyncRoute(async (req, 
       text: `Use este link para criar uma nova senha. Ele expira em 30 minutos: ${resetUrl}`,
       html: `<p>Use o link abaixo para criar uma nova senha. Ele expira em 30 minutos.</p><p><a href="${resetUrl}">Criar nova senha</a></p>`,
     });
-  } catch (error) {
+  } catch {
     // Não muda a resposta para evitar enumeração de contas. O erro fica nos
     // logs operacionais para alertas do provedor.
-    console.error('Falha ao enviar recuperação de senha:', error);
+    logEvent('error', 'email_delivery_error', { error_name: 'Error' });
   }
   return res.json({ message: RECOVERY_MESSAGE });
 }));
@@ -219,92 +225,95 @@ authRouter.post('/reset-password', resetPasswordLimit, asyncRoute(async (req, re
   }
 }));
 
+
+async function authData(user: import('./session.js').SessionUser) {
+  if (user.role === 'admin') return null;
+  if (user.tenant_role === 'OPERATOR') return loadOperatorData(user.tenant_id!);
+  return loadBootstrapData({ id: user.tenant_id!, email: user.email, name: user.name });
+}
+
 authRouter.post('/login', loginLimit, asyncRoute(async (req, res) => {
   const { email, password } = req.body ?? {};
-
-  if (typeof email !== 'string' || typeof password !== 'string') {
-    return res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
+  if (typeof email !== 'string' || typeof password !== 'string' || email.length>254 || Buffer.byteLength(password)>72) {
+    return res.status(400).json({error:'E-mail e senha inválidos.'});
   }
-  if (email.length > 254 || Buffer.byteLength(password, 'utf8') > 72) {
-    return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
-  }
-
-  const normalizedEmail = email.trim().toLowerCase();
-  const result = await pool.query('SELECT id, email, name, password_hash, token_version, role, status FROM users WHERE email = $1', [
-    normalizedEmail,
-  ]);
-  const user = result.rows[0];
-  if (!user || !(await comparePassword(password, user.password_hash))) {
-    return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
-  }
-  if (user.status !== 'active') {
-    return res.status(403).json({
-      error: 'Esta conta está suspensa. Entre em contato com o suporte.',
-      code: 'ACCOUNT_SUSPENDED',
-    });
-  }
-
-  const role = user.role as 'client' | 'admin';
-  const data = role === 'client' ? await loadBootstrapData({ id: user.id, email: user.email, name: user.name }) : null;
-  const token = signToken({ sub: user.id, email: user.email, ver: Number(user.token_version), role });
-  setRefreshCookie(res, { id: user.id, email: user.email, tokenVersion: Number(user.token_version), role });
-  res.json({ token, user: { id: user.id, email: user.email, role }, data });
+  const row = (await pool.query('SELECT id FROM users WHERE email=$1',[email.trim().toLowerCase()])).rows[0];
+  const user = row ? await sessionUser(row.id) : undefined;
+  if (!user || !(await comparePassword(password,user.password_hash))) return res.status(401).json({error:'E-mail ou senha incorretos.'});
+  if (!activeUser(user)) return res.status(403).json({error:'Conta ou operador desativado.',code:'ACCOUNT_SUSPENDED'});
+  const payload = await createSession(user);
+  setRefreshCookie(res,payload);
+  return res.json({token:signToken(payload),user:publicUser(user),data:await authData(user)});
 }));
 
-authRouter.post('/refresh', authReadLimit, asyncRoute(async (req, res) => {
-  const refreshToken = readCookie(req, REFRESH_COOKIE);
-  if (!refreshToken) return res.status(401).json({ error: 'Sessão persistente ausente.' });
-
+authRouter.post('/refresh', authReadLimit, asyncRoute(async (req,res) => {
+  const token=readCookie(req,REFRESH_COOKIE);
+  if (!token) return res.status(401).json({error:'Sessão persistente ausente.'});
   let payload;
+  try { payload=verifyRefreshToken(token); } catch { return res.status(401).json({error:'Sessão expirada.'}); }
+  let validated;
   try {
-    payload = verifyRefreshToken(refreshToken);
-  } catch {
-    res.clearCookie(REFRESH_COOKIE, refreshCookieOptions());
-    return res.status(401).json({ error: 'Sessão persistente inválida ou expirada.' });
+    validated=await validateSession(payload,false,true);
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'status' in error && error.status === 401) {
+      res.clearCookie(REFRESH_COOKIE,refreshCookieOptions());
+    }
+    throw error;
   }
-
-  const result = await pool.query('SELECT id, email, name, token_version, role, status FROM users WHERE id = $1', [payload.sub]);
-  const user = result.rows[0];
-  if (!user || user.status !== 'active' || user.role !== payload.role || Number(user.token_version) !== payload.ver) {
-    res.clearCookie(REFRESH_COOKIE, refreshCookieOptions());
-    return res.status(401).json({ error: 'Usuário da sessão não existe mais.' });
-  }
-
-  const role = user.role as 'client' | 'admin';
-  const data = role === 'client' ? await loadBootstrapData({ id: user.id, email: user.email, name: user.name }) : null;
-  const token = signToken({ sub: user.id, email: user.email, ver: Number(user.token_version), role });
-  setRefreshCookie(res, { id: user.id, email: user.email, tokenVersion: Number(user.token_version), role });
-  return res.json({ token, user: { id: user.id, email: user.email, role }, data });
+  const {user,locked}=validated;
+  const nextPayload=tokenPayload(user,payload.sid!);
+  setRefreshCookie(res,nextPayload);
+  return res.json({token:signToken(nextPayload),user:publicUser(user),locked,
+    data:locked ? undefined : await authData(user)});
 }));
 
-authRouter.post('/logout', (_req, res) => {
-  res.clearCookie(REFRESH_COOKIE, refreshCookieOptions());
-  return res.status(204).send();
-});
-
-authRouter.get('/me', authReadLimit, asyncRoute(async (req, res) => {
-  const authHeader = req.headers.authorization;
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
-  if (!token) {
-    return res.status(401).json({ error: 'Token ausente.' });
-  }
+authRouter.get('/me', authReadLimit, asyncRoute(async (req,res) => {
+  const token=req.headers.authorization?.replace(/^Bearer /,'');
+  if (!token) return res.status(401).json({error:'Token ausente.'});
   let payload;
-  try {
-    payload = verifyToken(token);
-  } catch {
-    return res.status(401).json({ error: 'Token inválido ou expirado.' });
-  }
+  try { payload=verifyToken(token); } catch { return res.status(401).json({error:'Token inválido ou expirado.'}); }
+  const {user}=await validateSession(payload);
+  return res.json({user:publicUser(user),data:await authData(user)});
+}));
 
-  const result = await pool.query('SELECT id, email, name, token_version, role, status FROM users WHERE id = $1', [payload.sub]);
-  const user = result.rows[0];
-  if (!user || user.status !== 'active' || user.role !== payload.role || Number(user.token_version) !== payload.ver) {
-    return res.status(401).json({ error: 'Sessão revogada. Entre novamente.' });
-  }
+authRouter.post('/session/activity', authReadLimit, asyncRoute(async (req,res) => {
+  const token=req.headers.authorization?.replace(/^Bearer /,'');
+  if (!token) return res.status(401).json({error:'Token ausente.'});
+  let payload;
+  try { payload=verifyToken(token); } catch { return res.status(401).json({error:'Token expirado.'}); }
+  await validateSession(payload,true);
+  return res.sendStatus(204);
+}));
 
-  const role = user.role as 'client' | 'admin';
-  const data = role === 'client' ? await loadBootstrapData({ id: user.id, email: user.email, name: user.name }) : null;
-  // Faz upgrade transparente de sessões antigas: um access token ainda válido
-  // passa a receber o cookie persistente sem exigir novo login.
-  setRefreshCookie(res, { id: user.id, email: user.email, tokenVersion: Number(user.token_version), role });
-  return res.json({ user: { id: user.id, email: user.email, role }, data });
+authRouter.post('/session/lock', authReadLimit, asyncRoute(async (req,res) => {
+  const token=readCookie(req,REFRESH_COOKIE);
+  if (!token) return res.status(401).json({error:'Sessão ausente.'});
+  let payload;
+  try { payload=verifyRefreshToken(token); } catch { return res.sendStatus(401); }
+  await validateSession(payload,false,true);
+  await pool.query('UPDATE auth_sessions SET locked_at=now() WHERE id=$1 AND actor_id=$2',[payload.sid,payload.sub]);
+  return res.sendStatus(204);
+}));
+
+authRouter.post('/session/unlock', loginLimit, asyncRoute(async (req,res) => {
+  const token=readCookie(req,REFRESH_COOKIE);
+  if (!token) return res.status(401).json({error:'Sessão ausente.'});
+  let payload;
+  try { payload=verifyRefreshToken(token); } catch { return res.sendStatus(401); }
+  const {user}=await validateSession(payload,false,true);
+  if (typeof req.body?.password!=='string' || Buffer.byteLength(req.body.password)>72 ||
+    !(await comparePassword(req.body.password,user.password_hash))) return res.status(401).json({error:'Senha incorreta.'});
+  await pool.query('UPDATE auth_sessions SET locked_at=NULL,last_activity_at=now() WHERE id=$1 AND actor_id=$2',[payload.sid,user.id]);
+  const nextPayload=tokenPayload(user,payload.sid!);
+  setRefreshCookie(res,nextPayload);
+  return res.json({token:signToken(nextPayload),user:publicUser(user),data:await authData(user)});
+}));
+
+authRouter.post('/logout', asyncRoute(async (req,res) => {
+  const token=readCookie(req,REFRESH_COOKIE);
+  if (token) { try { const payload=verifyRefreshToken(token);
+    await pool.query('DELETE FROM auth_sessions WHERE id=$1 AND actor_id=$2',[payload.sid,payload.sub]);
+  } catch { /* Cookie já expirado: apenas limpar. */ } }
+  res.clearCookie(REFRESH_COOKIE,refreshCookieOptions());
+  return res.sendStatus(204);
 }));

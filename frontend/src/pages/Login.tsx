@@ -104,6 +104,9 @@ export default function Login() {
       <Link to="/suporte" className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-ink-soft transition hover:text-ink">
         <Headset size={17} /> Precisa de ajuda? Fale com o suporte
       </Link>
+      <p className="mt-3 text-xs text-ink-soft">
+        <Link className="underline" to="/termos">Termos</Link> · <Link className="underline" to="/privacidade">Privacidade</Link>
+      </p>
     </div>
   );
 }

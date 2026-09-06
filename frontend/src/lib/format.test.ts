@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { parseMoney, sanitizeIntegerInput, sanitizeMoneyInput, todayISO } from './format';
+import {
+  formatDateInput,
+  parseDateInput,
+  parseMoney,
+  sanitizeDateInput,
+  sanitizeIntegerInput,
+  sanitizeMoneyInput,
+  todayISO,
+} from './format';
 
 describe('parseMoney', () => {
   it('remove o separador de milhar e converte a vírgula decimal', () => {
@@ -20,6 +28,21 @@ describe('parseMoney', () => {
 
   it('remove múltiplos separadores de milhar', () => {
     expect(parseMoney('1.234.567,89')).toBe(1234567.89);
+  });
+});
+
+describe('datas em formulários brasileiros', () => {
+  it('exibe e converte uma data sem depender do idioma do navegador', () => {
+    expect(formatDateInput('2026-08-28')).toBe('28/08/2026');
+    expect(parseDateInput('28/08/2026')).toBe('2026-08-28');
+  });
+
+  it('rejeita datas inexistentes', () => {
+    expect(parseDateInput('31/02/2026')).toBeNull();
+  });
+
+  it('aplica a máscara durante a digitação', () => {
+    expect(sanitizeDateInput('28082026')).toBe('28/08/2026');
   });
 });
 

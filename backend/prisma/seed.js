@@ -97,6 +97,8 @@ async function applySchema() {
     './migrations/0001_init/migration.sql',
     './migrations/0002_admin_panel/migration.sql',
     './migrations/0003_admin_account_management/migration.sql',
+    './migrations/0004_tenant_operations/migration.sql',
+    './migrations/0005_privacy/migration.sql',
   ];
   for (const migrationPath of migrationPaths) {
     const schema = await readFile(new URL(migrationPath, import.meta.url), 'utf8');
@@ -108,8 +110,8 @@ async function resetDatabase() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    await client.query('TRUNCATE admin_audit_logs');
     for (const table of [
-      'admin_audit_logs',
       'transactions', 'credit_sales', 'sale_items', 'sales', 'cash_sessions',
       'fixed_expenses', 'products', 'categories', 'customers', 'password_reset_tokens',
     ]) await client.query(`DELETE FROM ${table}`);
@@ -417,9 +419,11 @@ async function seedTenant(client, user, passwordHash) {
   try {
     const userId = await insertReturningId(
       client,
-      'INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id',
+      "INSERT INTO users (email, password_hash, name, account_kind) VALUES ($1, $2, $3, 'owner') RETURNING id",
       [user.email, passwordHash, user.name],
     );
+    await client.query(`INSERT INTO tenant_memberships(actor_id,user_id,role)
+      VALUES($1,$1,'OWNER') ON CONFLICT(actor_id) DO UPDATE SET user_id=excluded.user_id,role='OWNER',active=true`, [userId]);
     await client.query("SELECT set_config('app.current_user_id', $1, true)", [userId]);
     await client.query(
       `INSERT INTO business_settings
@@ -495,10 +499,13 @@ async function main() {
     for (const user of DEMO_USERS) {
       if (await userExists(client, user.email)) {
         await client.query(
-          `UPDATE users SET password_hash = $1, role = 'client', status = 'active',
-             token_version = token_version + 1, updated_at = now() WHERE email = $2`,
+          `UPDATE users SET password_hash = $1, role = 'client', account_kind='owner', status = 'active',
+             token_version = token_version + 1, updated_at = now() WHERE email = $2 RETURNING id`,
           [passwordHash, user.email],
         );
+        await client.query(`INSERT INTO tenant_memberships(actor_id,user_id,role)
+          SELECT id,id,'OWNER' FROM users WHERE email=$1
+          ON CONFLICT(actor_id) DO UPDATE SET user_id=excluded.user_id,role='OWNER',active=true`, [user.email]);
         console.log(`Conta ${user.email} ja existe; senha de demonstracao atualizada e dados preservados. Use --reset para recriar os dados.`);
         continue;
       }

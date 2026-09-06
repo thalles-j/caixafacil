@@ -121,6 +121,19 @@ As operações autenticadas usam `withTenantTransaction` em
 `backend/src/db.ts`, mantendo o tenant dentro da transação e garantindo as
 políticas de RLS no pool do Neon.
 
+Cada estabelecimento possui um OWNER e pode criar operadores em `/operadores`.
+Operadores têm credenciais próprias e acesso ao catálogo, clientes, caixa e
+vendas da sessão aberta para devoluções confirmadas; as
+configurações, relatórios, backup e gestão da conta permanecem com o OWNER.
+Contas de operador não aparecem como clientes no painel da plataforma.
+
+O caixa oferece impressão ESC/POS/Web Serial, fallback HTML/PDF, gaveta,
+estornos auditados e fila IndexedDB para vendas sem rede. Veja [docs/PDV.md](docs/PDV.md).
+Os rascunhos de Termos e Privacidade, consentimento WhatsApp e anonimização estão
+descritos em [docs/LGPD.md](docs/LGPD.md); os textos exigem revisão jurídica.
+Sentry, logs correlacionados e monitor externo estão em
+[docs/OBSERVABILIDADE.md](docs/OBSERVABILIDADE.md).
+
 ## Recuperação de conta
 
 Na tela de login, escolha **Esqueci minha senha** e informe o e-mail da conta.

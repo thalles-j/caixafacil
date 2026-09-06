@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { verifyToken, type TokenPayload } from '../auth/jwt.js';
-import { pool } from '../db.js';
+import { validateSession } from '../auth/session.js';
+import { requestActor } from '../tenant/audit.js';
 
 export type AdminResponseLocals = { auth?: TokenPayload };
 
@@ -10,13 +11,11 @@ export function authenticateAccessToken(req: Request, res: Response<unknown, Adm
   if (!token) return res.status(401).json({ error: 'Token ausente.' });
   try {
     const payload = verifyToken(token);
-    void pool.query('SELECT role, status, token_version FROM users WHERE id = $1', [payload.sub])
-      .then((result) => {
-        const user = result.rows[0];
-        if (!user || user.status !== 'active' || user.role !== payload.role || Number(user.token_version) !== payload.ver) {
-          return res.status(401).json({ error: 'Sessão revogada ou conta suspensa.' });
-        }
+    void validateSession(payload, !['GET','HEAD'].includes(req.method))
+      .then(() => {
         res.locals.auth = payload;
+        if (payload.tenantId && payload.tenantRole) return requestActor.run({ tenantId: payload.tenantId,
+          actorId: payload.sub, actorRole: payload.tenantRole, method: req.method, path: req.path }, next);
         return next();
       })
       .catch(next);

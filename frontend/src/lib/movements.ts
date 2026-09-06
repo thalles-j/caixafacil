@@ -17,6 +17,9 @@ export interface Movimentacao {
   fiadoPendente?: boolean;
   ocorridoEm: string;
   ordem: number;
+  saleId?: string;
+  itemId?: string;
+  quantidadeDisponivel?: number;
 }
 
 function ordenarMaisRecentesPrimeiro(movimentacoes: Movimentacao[]): Movimentacao[] {
@@ -118,7 +121,7 @@ export function obterVendas(data: AppData): Movimentacao[] {
   );
 
   const vendas: Movimentacao[] = data.vendas.map((venda, index) => {
-      const conta = contasPorVenda.get(venda.id);
+      const conta = contasPorVenda.get(venda.saleId ?? venda.id);
       const fiadoPendente = venda.formaPagamento === 'fiado' && !conta?.quitado;
       const itemType = venda.produtoId ? produtosPorId.get(venda.produtoId)?.type : venda.tipoItem;
       return {
@@ -141,6 +144,9 @@ export function obterVendas(data: AppData): Movimentacao[] {
         fiadoPendente,
         ocorridoEm: venda.createdAt ?? `${venda.data}T12:00:00.000Z`,
         ordem: index,
+        saleId: venda.saleId,
+        itemId: venda.itemId ?? venda.id,
+        quantidadeDisponivel: Math.max(0, venda.quantidade - (venda.quantidadeDevolvida ?? 0)),
       };
     });
 

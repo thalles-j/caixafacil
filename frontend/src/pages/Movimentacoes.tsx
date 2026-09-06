@@ -14,6 +14,8 @@ import { formatCurrency, formatDate } from '../lib/format';
 import { formaPagamentoLabel, obterMovimentacoesFinanceiras, obterVendas } from '../lib/movements';
 import { paginateItems } from '../lib/pagination';
 import { entryTypeOptionsForOffer } from '../lib/offering';
+import { cancelSaleRequest, returnSaleItemRequest } from '../lib/business';
+import { APP_DATA_CHANGED_EVENT } from '../lib/storage';
 import type { FormaPagamento, TipoEntrada } from '../types';
 
 export type ModoMovimentacoes = 'todas' | 'vendas' | 'saidas';
@@ -46,6 +48,8 @@ export default function Movimentacoes({ modo }: { modo: ModoMovimentacoes }) {
   const [tipoEntrada, setTipoEntrada] = useState<FiltroTipoEntrada>('todas');
   const [filtrosMobileAbertos, setFiltrosMobileAbertos] = useState(false);
   const [pagina, setPagina] = useState(1);
+  const [acaoEmCurso, setAcaoEmCurso] = useState<string | null>(null);
+  const [erroAcao, setErroAcao] = useState('');
   const texto = configuracao[modo];
   const opcoesFiltroEntrada: ReadonlyArray<{ valor: FiltroTipoEntrada; label: string }> = [
     { valor: 'todas', label: 'Todas' },
@@ -78,6 +82,40 @@ export default function Movimentacoes({ modo }: { modo: ModoMovimentacoes }) {
       return correspondeBusca && correspondeInicio && correspondeFim && correspondePagamento && correspondeTipoEntrada;
     });
   }, [busca, data, dataFinal, dataInicial, formaPagamento, modo, tipoEntradaEfetivo]);
+
+  const primeiroItemPorVenda = useMemo(() => {
+    const ids = new Map<string, string>();
+    for (const venda of data.vendas) {
+      if (venda.saleId && !ids.has(venda.saleId)) ids.set(venda.saleId, venda.itemId ?? venda.id);
+    }
+    return ids;
+  }, [data.vendas]);
+
+  async function executarEstorno(
+    movimento: (typeof movimentacoes)[number], tipo: 'total' | 'parcial',
+  ) {
+    if (!movimento.saleId || !movimento.itemId) return;
+    const quantidade = tipo === 'parcial'
+      ? Number(window.prompt(`Quantidade a devolver (máximo ${movimento.quantidadeDisponivel ?? 0}):`, '1'))
+      : 0;
+    if (tipo === 'parcial' && (!Number.isFinite(quantidade) || quantidade <= 0)) return;
+    const motivo = window.prompt(`Informe o motivo do ${tipo === 'total' ? 'cancelamento' : 'estorno'}:`)?.trim();
+    if (!motivo) return;
+    const confirmacao = window.prompt(`Digite o número da venda para confirmar:\n${movimento.saleId}`)?.trim();
+    if (!confirmacao) return;
+    setErroAcao('');
+    setAcaoEmCurso(`${movimento.saleId}:${tipo}`);
+    try {
+      const resposta = tipo === 'total'
+        ? await cancelSaleRequest(movimento.saleId, motivo, confirmacao)
+        : await returnSaleItemRequest(movimento.saleId, movimento.itemId, quantidade, motivo, confirmacao);
+      window.dispatchEvent(new CustomEvent(APP_DATA_CHANGED_EVENT, { detail: resposta.data }));
+    } catch (error) {
+      setErroAcao(error instanceof Error ? error.message : 'Não foi possível concluir o estorno.');
+    } finally {
+      setAcaoEmCurso(null);
+    }
+  }
 
   const total = movimentacoes.reduce(
     (soma, movimento) => soma + (modo === 'todas' && movimento.tipo === 'saida' ? -movimento.valor : movimento.valor),
@@ -255,6 +293,8 @@ export default function Movimentacoes({ modo }: { modo: ModoMovimentacoes }) {
         </div>
       </div>
 
+      {erroAcao && <p role="alert" className="mb-3 rounded-xl bg-stamp/10 px-3 py-2 text-sm text-stamp">{erroAcao}</p>}
+
       <div className="overflow-hidden rounded-2xl border border-line bg-paper-raised shadow-sm">
         {movimentacoes.length === 0 ? (
           <div className="flex flex-col items-center px-4 py-12 text-center">
@@ -302,6 +342,26 @@ export default function Movimentacoes({ modo }: { modo: ModoMovimentacoes }) {
                     <p className="mt-1 text-[11px] text-ink-soft">{formatDate(movimento.data)}</p>
                     {modo === 'vendas' && movimento.formaPagamento && !fiadoPendente && (
                       <p className="mt-0.5 text-[10px] text-ink-soft">{formaPagamentoLabel(movimento.formaPagamento)}</p>
+                    )}
+                    {modo === 'vendas' && movimento.saleId && movimento.itemId && (
+                      <div className="mt-2 flex justify-end gap-2">
+                        {(movimento.quantidadeDisponivel ?? 0) > 0 && (
+                          <button
+                            type="button"
+                            disabled={acaoEmCurso !== null}
+                            onClick={() => void executarEstorno(movimento, 'parcial')}
+                            className="text-[11px] font-semibold text-brass disabled:opacity-50"
+                          >Devolver item</button>
+                        )}
+                        {primeiroItemPorVenda.get(movimento.saleId) === movimento.itemId && (
+                          <button
+                            type="button"
+                            disabled={acaoEmCurso !== null}
+                            onClick={() => void executarEstorno(movimento, 'total')}
+                            className="text-[11px] font-semibold text-stamp disabled:opacity-50"
+                          >Cancelar venda</button>
+                        )}
+                      </div>
                     )}
                   </div>
                 </li>

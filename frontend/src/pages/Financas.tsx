@@ -12,21 +12,33 @@ import {
   Trash,
   Phone,
   ArrowsClockwise,
-  WhatsappLogo,
+  CalendarBlank,
 } from '@phosphor-icons/react';
 import { useAppData } from '../context/AppDataContext';
-import { formatCurrency, formatDate, parseMoney, sanitizeMoneyInput, todayISO } from '../lib/format';
+import {
+  formatCurrency,
+  formatDate,
+  formatDateInput,
+  parseDateInput,
+  parseMoney,
+  sanitizeDateInput,
+  sanitizeMoneyInput,
+  todayISO,
+} from '../lib/format';
 import Modal from '../components/Modal';
 import Pagination from '../components/Pagination';
 import type { Cliente, Conta, FormaPagamento, LancamentoManual, TipoConta } from '../types';
 import FinanceNav from '../components/FinanceNav';
 import { getPagination, paginateItems } from '../lib/pagination';
-import { buildWhatsAppChargeUrl } from '../lib/whatsapp';
+import WhatsAppChargeButton from '../components/WhatsAppChargeButton';
+import CustomerPrivacyActions from '../components/CustomerPrivacyActions';
+import { useAuth } from '../context/AuthContext';
 
 type ItemParaExcluir = { tipo: 'conta' | 'lancamento'; id: string; label: string };
 type BaixaPendente = { tipo: 'fiado' | 'fixa'; id: string; nome: string; valor: number };
 
 export default function Financas() {
+  const { user } = useAuth();
   const {
     data,
     addConta,
@@ -143,9 +155,16 @@ export default function Financas() {
     const form = new FormData(e.currentTarget);
     const descricao = String(form.get('descricao') ?? '').trim();
     const valor = parseMoney(String(form.get('valor') ?? '0'));
-    const vencimento = String(form.get('vencimento') ?? contaEditando.vencimento);
+    const vencimentoInput = e.currentTarget.elements.namedItem('vencimento') as HTMLInputElement;
+    const vencimento = parseDateInput(vencimentoInput.value);
     const clienteNome = String(form.get('clienteNome') ?? '').trim();
     const clienteTelefone = String(form.get('clienteTelefone') ?? '').trim();
+
+    if (!vencimento) {
+      vencimentoInput.setCustomValidity('Informe uma data válida no formato DD/MM/AAAA.');
+      vencimentoInput.reportValidity();
+      return;
+    }
 
     if (!descricao || valor <= 0 || (contaEditando.clienteId && !clienteNome)) return;
 
@@ -361,16 +380,6 @@ export default function Financas() {
                   const venceHoje = conta.vencimento === hoje && !conta.quitado;
                   const atrasada = !conta.quitado && conta.vencimento < hoje;
                   const cliente = conta.clienteId ? clientesPorId.get(conta.clienteId) : undefined;
-                  const whatsappUrl = !conta.quitado && conta.tipo === 'receber' && cliente
-                    ? buildWhatsAppChargeUrl({
-                        telefone: cliente.telefone,
-                        clienteNome: cliente.nome,
-                        valor: conta.valor,
-                        descricao: conta.descricao,
-                        vencimento: conta.vencimento,
-                        nomeNegocio: data.config?.nome,
-                      })
-                    : null;
                   return (
                     <li
                       key={conta.id}
@@ -428,17 +437,7 @@ export default function Financas() {
                           {formatCurrency(conta.valor)}
                         </p>
                         <div className="flex items-center gap-1">
-                          {whatsappUrl && (
-                            <a
-                              href={whatsappUrl}
-                              target="_blank"
-                              rel="noreferrer noopener"
-                              aria-label={`Cobrar ${cliente?.nome ?? 'cliente'} pelo WhatsApp`}
-                              className="rounded bg-[#25D366]/15 p-1.5 text-[#128C4A] transition hover:bg-[#25D366]/25 dark:text-[#56e48d]"
-                            >
-                              <WhatsappLogo size={15} weight="fill" />
-                            </a>
-                          )}
+                          {!conta.quitado && conta.tipo === 'receber' && cliente && <WhatsAppChargeButton customerId={cliente.id} />}
                           {!conta.quitado && (
                             <button
                               onClick={() => {
@@ -528,12 +527,6 @@ export default function Financas() {
               </div>
               <ul className="divide-y divide-line">
                 {clientesPaginados.items.map((c) => {
-                  const whatsappUrl = buildWhatsAppChargeUrl({
-                    telefone: c.telefone,
-                    clienteNome: c.nome,
-                    valor: c.total,
-                    nomeNegocio: data.config?.nome,
-                  });
                   return (
                     <li key={c.id} className="py-2 text-sm">
                       <div className="flex items-start justify-between gap-2">
@@ -547,19 +540,9 @@ export default function Financas() {
                         </div>
                         <span className="shrink-0 font-ledger font-bold tabular-nums text-brass">{formatCurrency(c.total)}</span>
                       </div>
-                      {whatsappUrl ? (
-                        <a
-                          href={whatsappUrl}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                          aria-label={`Cobrar ${c.nome} pelo WhatsApp`}
-                          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#25D366]/15 px-2 py-1.5 text-xs font-bold text-[#128C4A] dark:text-[#55e781]"
-                        >
-                          <WhatsappLogo size={15} weight="fill" /> Cobrar via WhatsApp
-                        </a>
-                      ) : (
-                        <p className="mt-1 text-[11px] text-ink-soft">Cadastre o telefone para cobrar pelo WhatsApp.</p>
-                      )}
+                      <div className="mt-2 flex flex-wrap items-center gap-3"><WhatsAppChargeButton customerId={c.id} />
+                        <CustomerPrivacyActions customerId={c.id} customerName={c.nome} canAnonymize={user?.tenantRole === 'OWNER'} />
+                      </div>
                     </li>
                   );
                 })}
@@ -678,13 +661,43 @@ export default function Financas() {
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-ink-soft">Vencimento</label>
-              <input
-                name="vencimento"
-                type="date"
-                required
-                defaultValue={contaEditando.vencimento}
-                className="w-full rounded-lg border border-line bg-paper p-2 text-ink focus:outline-none focus:ring-2 focus:ring-ledger/30"
-              />
+              <div className="relative">
+                <input
+                  name="vencimento"
+                  type="text"
+                  inputMode="numeric"
+                  required
+                  placeholder="DD/MM/AAAA"
+                  pattern="\d{2}/\d{2}/\d{4}"
+                  maxLength={10}
+                  aria-describedby="formato-vencimento-edicao"
+                  defaultValue={formatDateInput(contaEditando.vencimento)}
+                  onInput={(e) => {
+                    e.currentTarget.value = sanitizeDateInput(e.currentTarget.value);
+                    e.currentTarget.setCustomValidity('');
+                  }}
+                  className="w-full rounded-lg border border-line bg-paper py-2 pl-2 pr-12 text-ink focus:outline-none focus:ring-2 focus:ring-ledger/30"
+                />
+                <CalendarBlank
+                  aria-hidden="true"
+                  size={20}
+                  className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-ink-soft"
+                />
+                <input
+                  type="date"
+                  aria-label="Escolher vencimento no calendário"
+                  defaultValue={contaEditando.vencimento}
+                  onChange={(e) => {
+                    const textInput = e.currentTarget.parentElement?.querySelector<HTMLInputElement>('input[name="vencimento"]');
+                    if (textInput && e.currentTarget.value) {
+                      textInput.value = formatDateInput(e.currentTarget.value);
+                      textInput.setCustomValidity('');
+                    }
+                  }}
+                  className="absolute inset-y-0 right-0 w-12 cursor-pointer opacity-0"
+                />
+              </div>
+              <p id="formato-vencimento-edicao" className="mt-1 text-[11px] text-ink-soft">Formato: dia/mês/ano</p>
             </div>
             <button type="submit" className="mt-2 w-full rounded-lg bg-ledger py-2.5 font-bold text-paper transition hover:bg-ledger-strong">
               Salvar Alterações

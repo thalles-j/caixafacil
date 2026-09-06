@@ -5,23 +5,24 @@ import { comparePassword, hashPassword, passwordValidationError } from '../auth/
 import { rateLimit } from '../security.js';
 import { authenticateAccessToken } from '../admin/authorization.js';
 import { requireClient } from '../admin/requireAdmin.js';
+import { requireTenantRole } from '../tenant/authorization.js';
 
 export const accountRouter = Router();
 accountRouter.use(authenticateAccessToken);
 accountRouter.use(requireClient);
 const sensitiveAccountLimit = rateLimit('account-sensitive', 10, 15 * 60 * 1000);
 const BACKUP_FORMAT = 'caixafacil-postgres-backup';
-const BACKUP_VERSION = 2;
+const BACKUP_VERSION = 3;
 const RESTORE_COLUMNS: Record<string, string[]> = {
-  business_settings: ['user_id', 'business_name', 'business_category', 'offering', 'controls_stock', 'daily_sales_goal', 'report_frequency', 'report_by_email', 'report_email', 'view_period', 'onboarding_completed', 'created_at', 'updated_at'],
+  business_settings: ['user_id', 'business_name', 'business_category', 'offering', 'controls_stock', 'daily_sales_goal', 'report_frequency', 'report_by_email', 'report_email', 'view_period', 'onboarding_completed', 'idle_timeout_minutes', 'receipt_settings', 'created_at', 'updated_at'],
   categories: ['id', 'user_id', 'name', 'created_at', 'updated_at'],
   products: ['id', 'user_id', 'category_id', 'kind', 'name', 'barcode', 'sale_price', 'cost_price', 'stock_quantity', 'minimum_quantity', 'service_duration', 'active', 'created_at', 'updated_at'],
-  customers: ['id', 'user_id', 'name', 'phone', 'email', 'notes', 'created_at', 'updated_at'],
+  customers: ['id', 'user_id', 'name', 'phone', 'email', 'notes', 'whatsapp_consent_at', 'whatsapp_consent_version', 'whatsapp_consent_recorded_by', 'anonymized_at', 'created_at', 'updated_at'],
   cash_sessions: ['id', 'user_id', 'responsible', 'opened_at', 'closed_at', 'opening_balance', 'closing_balance', 'expected_balance', 'status', 'notes', 'created_at', 'updated_at'],
-  sales: ['id', 'user_id', 'cash_session_id', 'customer_id', 'description', 'payment_method', 'status', 'total_amount', 'sold_at', 'cancelled_at', 'created_at', 'updated_at'],
-  sale_items: ['id', 'user_id', 'sale_id', 'product_id', 'product_name', 'quantity', 'unit_price', 'unit_cost', 'created_at'],
+  sales: ['id', 'user_id', 'cash_session_id', 'customer_id', 'description', 'payment_method', 'status', 'total_amount', 'sold_at', 'cancelled_at', 'actor_id', 'actor_name', 'client_sale_id', 'request_hash', 'returned_amount', 'created_at', 'updated_at'],
+  sale_items: ['id', 'user_id', 'sale_id', 'product_id', 'product_name', 'quantity', 'unit_price', 'unit_cost', 'returned_quantity', 'created_at'],
   fixed_expenses: ['id', 'user_id', 'description', 'amount', 'recurrence', 'starts_on', 'ends_on', 'next_due_date', 'due_day', 'active', 'created_at', 'updated_at'],
-  credit_sales: ['id', 'user_id', 'sale_id', 'customer_id', 'amount', 'paid_amount', 'status', 'due_date', 'paid_at', 'created_at', 'updated_at'],
+  credit_sales: ['id', 'user_id', 'sale_id', 'customer_id', 'amount', 'paid_amount', 'returned_amount', 'status', 'due_date', 'paid_at', 'created_at', 'updated_at'],
   transactions: ['id', 'user_id', 'cash_session_id', 'sale_id', 'fixed_expense_id', 'credit_sale_id', 'type', 'source', 'payment_method', 'amount', 'description', 'movement_kind', 'entry_kind', 'expense_kind', 'identification_pending', 'occurred_at', 'created_at'],
 };
 const BACKUP_TABLES = Object.keys(RESTORE_COLUMNS);
@@ -43,13 +44,13 @@ function authenticatedUserId(req: Request): string | null {
   const token = header?.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return null;
   try {
-    return verifyToken(token).sub;
+    return verifyToken(token).tenantId ?? null;
   } catch {
     return null;
   }
 }
 
-accountRouter.delete('/data', sensitiveAccountLimit, asyncRoute(async (req, res) => {
+accountRouter.delete('/data', sensitiveAccountLimit, requireTenantRole('OWNER'), asyncRoute(async (req, res) => {
   const userId = authenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Token inválido ou expirado.' });
 
@@ -64,7 +65,7 @@ accountRouter.delete('/data', sensitiveAccountLimit, asyncRoute(async (req, res)
   return res.status(204).send();
 }));
 
-accountRouter.get('/backup', sensitiveAccountLimit, asyncRoute(async (req, res) => {
+accountRouter.get('/backup', sensitiveAccountLimit, requireTenantRole('OWNER'), asyncRoute(async (req, res) => {
   const userId = authenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Token inválido ou expirado.' });
 
@@ -85,7 +86,7 @@ accountRouter.get('/backup', sensitiveAccountLimit, asyncRoute(async (req, res) 
   });
 }));
 
-accountRouter.put('/backup', sensitiveAccountLimit, asyncRoute(async (req, res) => {
+accountRouter.put('/backup', sensitiveAccountLimit, requireTenantRole('OWNER'), asyncRoute(async (req, res) => {
   const userId = authenticatedUserId(req);
   if (!userId) return res.status(401).json({ error: 'Token inválido ou expirado.' });
   const backup = req.body;
@@ -104,6 +105,10 @@ accountRouter.put('/backup', sensitiveAccountLimit, asyncRoute(async (req, res) 
   }
 
   await withTenantTransaction(userId, async (client) => {
+    const protectedCustomers = await client.query(
+      'SELECT customer_id AS id FROM privacy_erasure_tombstones WHERE user_id = $1', [userId],
+    );
+    const permanentlyAnonymized = new Set(protectedCustomers.rows.map((row) => String(row.id)));
     for (const table of DELETE_ORDER) {
       await client.query(`DELETE FROM ${table} WHERE user_id = $1`, [userId]);
     }
@@ -116,6 +121,13 @@ accountRouter.put('/backup', sensitiveAccountLimit, asyncRoute(async (req, res) 
       // os campos pagos sem permitir uma dívida quitada sem receita associada.
       if (table === 'credit_sales') {
         rows = rows.map((row) => ({ ...row, paid_amount: 0, status: 'pendente', paid_at: null }));
+      }
+      if (table === 'customers') {
+        rows = rows.map((row) => permanentlyAnonymized.has(String(row.id))
+          ? { ...row, name: 'Cliente anonimizado', phone: null, email: null, notes: null,
+              whatsapp_consent_at: null, whatsapp_consent_version: null,
+              whatsapp_consent_recorded_by: null, anonymized_at: row.anonymized_at ?? new Date().toISOString() }
+          : { ...row, whatsapp_consent_at: null, whatsapp_consent_version: null, whatsapp_consent_recorded_by: null });
       }
       const columns = RESTORE_COLUMNS[table];
       const quotedColumns = columns.map((column) => `"${column}"`).join(', ');

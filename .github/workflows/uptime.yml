@@ -1,0 +1,38 @@
+name: Monitor de disponibilidade
+
+on:
+  schedule:
+    - cron: '3-58/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      simulate_failure:
+        description: Simular indisponibilidade e enviar e-mail de teste
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uptime-monitor
+  cancel-in-progress: false
+
+jobs:
+  health:
+    if: vars.UPTIME_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verificar API e alertar por e-mail
+        run: node scripts/uptime-monitor.mjs
+        env:
+          UPTIME_HEALTH_URL: ${{ vars.UPTIME_HEALTH_URL }}
+          UPTIME_ALERT_EMAIL: ${{ secrets.UPTIME_ALERT_EMAIL }}
+          EMAIL_WEBHOOK_URL: ${{ secrets.EMAIL_WEBHOOK_URL }}
+          EMAIL_WEBHOOK_TOKEN: ${{ secrets.EMAIL_WEBHOOK_TOKEN }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          UPTIME_SIMULATE_FAILURE: ${{ inputs.simulate_failure && 'true' || 'false' }}

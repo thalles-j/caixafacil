@@ -19,7 +19,7 @@ export async function loadBootstrapData(user: UserIdentity) {
     const settingsResult = await client.query(`
           SELECT business_name, business_category, offering, controls_stock,
                  daily_sales_goal, report_frequency, report_by_email, report_email,
-                 view_period, onboarding_completed
+                 view_period, onboarding_completed, idle_timeout_minutes, receipt_settings
           FROM business_settings
           WHERE user_id = $1
         `, [user.id]);
@@ -46,8 +46,10 @@ export async function loadBootstrapData(user: UserIdentity) {
           ORDER BY created_at, name
         `, [user.id]);
     const salesResult = await client.query(`
-          SELECT si.id, si.product_id, si.product_name, si.quantity, si.unit_price,
-                 s.cash_session_id, s.sold_at, s.payment_method, p.kind AS product_kind
+          SELECT si.id, si.id AS item_id, s.id AS sale_id, si.product_id, si.product_name,
+                 si.quantity, si.returned_quantity, si.unit_price,
+                 s.cash_session_id, s.sold_at, s.payment_method, s.returned_amount,
+                 p.kind AS product_kind
           FROM sale_items si
           JOIN sales s ON s.user_id = si.user_id AND s.id = si.sale_id
           LEFT JOIN products p ON p.user_id = si.user_id AND p.id = si.product_id
@@ -207,6 +209,8 @@ export async function loadBootstrapData(user: UserIdentity) {
         },
         viewPeriod: settings.view_period,
         onboardingConcluido: settings.onboarding_completed,
+        idleTimeoutMinutes: settings.idle_timeout_minutes,
+        receiptSettings: settings.receipt_settings,
       } : {
         nome: `${user.name ?? user.email.split('@')[0]} — Demonstração`,
         categoria: 'Alimentação (Mercado, Padaria...)',
@@ -238,11 +242,14 @@ export async function loadBootstrapData(user: UserIdentity) {
       })),
       vendas: salesResult.rows.map((sale) => ({
         id: sale.id,
+        saleId: sale.sale_id,
+        itemId: sale.item_id,
         caixaSessaoId: sale.cash_session_id ?? undefined,
         data: isoDate(sale.sold_at),
         createdAt: new Date(sale.sold_at).toISOString(),
         descricao: sale.product_name,
         quantidade: Number(sale.quantity),
+        quantidadeDevolvida: Number(sale.returned_quantity),
         valorUnitario: Number(sale.unit_price),
         formaPagamento: sale.payment_method,
         produtoId: sale.product_id ?? undefined,

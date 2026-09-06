@@ -19,11 +19,11 @@ describe('contactSupportRequest', () => {
     };
 
     await expect(contactSupportRequest(data)).resolves.toEqual({ message: 'Mensagem enviada.' });
-    expect(fetchMock).toHaveBeenCalledWith('/api/support/contact', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
+    const [, options] = fetchMock.mock.calls[0];
+    expect(options).toMatchObject({ method: 'POST', body: JSON.stringify(data) });
+    const headers = options?.headers as Headers;
+    expect(headers.get('Content-Type')).toBe('application/json');
+    expect(headers.get('X-Request-ID')).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it('expõe a mensagem segura devolvida pela API', async () => {

@@ -7,6 +7,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum tenant_role {
+  OWNER
+  OPERATOR
+}
+
 // RLS, triggers, views, constraints parciais e extensoes do Neon/Postgres
 // permanecem na migration SQL, pois nao possuem representacao completa no DSL.
 
@@ -16,6 +21,7 @@ model users {
   password_hash String
   token_version Int      @default(0)
   role          String   @default("client")
+  account_kind  String   @default("owner")
   status        String   @default("active")
   name          String?
   created_at    DateTime @default(now()) @db.Timestamptz(6)
@@ -26,6 +32,9 @@ model admin_audit_logs {
   id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   admin_user_id String?  @db.Uuid
   target_user_id String  @db.Uuid
+  user_id        String? @db.Uuid
+  actor_id       String? @db.Uuid
+  actor_role     String?
   action        String
   details       Json     @default("{}")
   created_at    DateTime @default(now()) @db.Timestamptz(6)
@@ -57,6 +66,8 @@ model business_settings {
   report_email         String?  @db.Citext
   view_period          String   @default("day")
   onboarding_completed Boolean  @default(false)
+  idle_timeout_minutes Int      @default(15)
+  receipt_settings     Json     @default("{\"paperWidth\":80,\"showOperator\":true,\"showPaymentMethod\":true}")
   created_at           DateTime @default(now()) @db.Timestamptz(6)
   updated_at           DateTime @default(now()) @db.Timestamptz(6)
 }
@@ -100,6 +111,10 @@ model customers {
   phone      String?
   email      String?  @db.Citext
   notes      String?
+  whatsapp_consent_at          DateTime? @db.Timestamptz(6)
+  whatsapp_consent_version     String?
+  whatsapp_consent_recorded_by String?   @db.Uuid
+  anonymized_at                DateTime? @db.Timestamptz(6)
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
 
@@ -136,6 +151,11 @@ model sales {
   total_amount    Decimal   @db.Decimal(14, 2)
   sold_at         DateTime  @default(now()) @db.Timestamptz(6)
   cancelled_at    DateTime? @db.Timestamptz(6)
+  actor_id         String?   @db.Uuid
+  actor_name       String?
+  client_sale_id   String?   @db.Uuid
+  request_hash     String?
+  returned_amount  Decimal   @default(0) @db.Decimal(14, 2)
   created_at      DateTime  @default(now()) @db.Timestamptz(6)
   updated_at      DateTime  @default(now()) @db.Timestamptz(6)
 
@@ -144,6 +164,7 @@ model sales {
   @@index([user_id, cash_session_id, sold_at(sort: Desc)], map: "idx_sales_user_session_sold")
   @@index([user_id, customer_id, sold_at(sort: Desc)], map: "idx_sales_user_customer_sold")
   @@index([user_id, payment_method, status], map: "idx_sales_user_payment_status")
+  @@unique([user_id, client_sale_id], map: "sales_idempotency")
 }
 
 model sale_items {
@@ -156,6 +177,7 @@ model sale_items {
   unit_price   Decimal  @db.Decimal(14, 2)
   unit_cost    Decimal  @default(0) @db.Decimal(14, 2)
   total_amount Decimal  @default(dbgenerated()) @db.Decimal(14, 2)
+  returned_quantity Decimal @default(0) @db.Decimal(14, 3)
   created_at   DateTime @default(now()) @db.Timestamptz(6)
 
   @@unique([user_id, id], map: "uq_sale_items_tenant_id")
@@ -188,6 +210,7 @@ model credit_sales {
   customer_id String    @db.Uuid
   amount      Decimal   @db.Decimal(14, 2)
   paid_amount Decimal   @default(0) @db.Decimal(14, 2)
+  returned_amount Decimal @default(0) @db.Decimal(14, 2)
   status      String    @default("pendente")
   due_date    DateTime? @db.Date
   paid_at     DateTime? @db.Timestamptz(6)
@@ -199,6 +222,31 @@ model credit_sales {
   @@index([user_id, status, due_date], map: "idx_credit_sales_user_status_due")
   @@index([user_id, customer_id, status], map: "idx_credit_sales_user_customer_status")
   @@index([user_id, created_at(sort: Desc)], map: "idx_credit_sales_user_created")
+}
+
+model tenant_memberships {
+  actor_id   String      @id @db.Uuid
+  user_id    String      @db.Uuid
+  role       tenant_role
+  active     Boolean     @default(true)
+  created_at DateTime    @default(now()) @db.Timestamptz(6)
+}
+
+model auth_sessions {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id          String    @db.Uuid
+  actor_id         String    @db.Uuid
+  last_activity_at DateTime  @default(now()) @db.Timestamptz(6)
+  locked_at        DateTime? @db.Timestamptz(6)
+  expires_at       DateTime  @default(dbgenerated("now() + interval '30 days'")) @db.Timestamptz(6)
+}
+
+model privacy_erasure_tombstones {
+  user_id       String   @db.Uuid
+  customer_id   String   @db.Uuid
+  anonymized_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([user_id, customer_id])
 }
 
 model transactions {

@@ -1,8 +1,10 @@
 import type { AppData } from '../types';
+import { observedFetch } from './observability';
 
 /** Chave legada, mantida apenas para remover tokens gravados por versões antigas. */
 export const TOKEN_KEY = 'mnb-auth-token';
 let accessTokenInMemory: string | null = null;
+let sessionLocked = false;
 
 function removeLegacyStoredToken() {
   try {
@@ -18,6 +20,9 @@ export type TokenPayload = {
   iat: number;
   exp: number;
   role: 'client' | 'admin';
+  tenantId?: string;
+  tenantRole?: 'OWNER' | 'OPERATOR';
+  sid?: string;
 };
 
 export function decodeToken(token: string): TokenPayload | null {
@@ -40,16 +45,18 @@ export function getStoredToken(): string | null {
   // O refresh token HTTP-only restaura a sessão após recarregar a página.
   // O access token não precisa ficar acessível em armazenamento persistente.
   removeLegacyStoredToken();
-  return accessTokenInMemory;
+  return sessionLocked ? null : accessTokenInMemory;
 }
 
 export function setStoredToken(token: string) {
   accessTokenInMemory = token;
+  sessionLocked = false;
   removeLegacyStoredToken();
 }
 
 export function clearStoredToken() {
   accessTokenInMemory = null;
+  sessionLocked = false;
   removeLegacyStoredToken();
 }
 
@@ -78,13 +85,14 @@ const API_URL = import.meta.env.VITE_API_URL ?? '/api';
 
 export type AuthResponse = {
   token: string;
-  user: { id: string; email: string; role: 'client' | 'admin' };
+  user: { id: string; email: string; name?: string | null; role: 'client' | 'admin'; tenantId?: string | null; tenantRole?: 'OWNER' | 'OPERATOR' | null; idleTimeoutMinutes?: number };
   data?: AppData | null;
+  locked?: boolean;
 };
 export type SessionResponse = Omit<AuthResponse, 'token'>;
 export type AccountBackup = {
   format: 'caixafacil-postgres-backup';
-  version: 2;
+  version: 3;
   exportedAt: string;
   tables: Record<string, unknown[]>;
 };
@@ -102,7 +110,7 @@ export async function registerRequest(
   password: string,
   confirmPassword: string,
 ): Promise<AuthResponse> {
-  const res = await fetch(`${API_URL}/auth/register`, {
+  const res = await observedFetch(`${API_URL}/auth/register`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -112,7 +120,7 @@ export async function registerRequest(
 }
 
 export async function loginRequest(email: string, password: string): Promise<AuthResponse> {
-  const res = await fetch(`${API_URL}/auth/login`, {
+  const res = await observedFetch(`${API_URL}/auth/login`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
@@ -122,7 +130,7 @@ export async function loginRequest(email: string, password: string): Promise<Aut
 }
 
 export async function forgotPasswordRequest(email: string): Promise<{ message: string; resetToken?: string }> {
-  const res = await fetch(`${API_URL}/auth/forgot-password`, {
+  const res = await observedFetch(`${API_URL}/auth/forgot-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),
@@ -135,7 +143,7 @@ export async function resetPasswordRequest(
   password: string,
   confirmPassword: string,
 ): Promise<{ message: string }> {
-  const res = await fetch(`${API_URL}/auth/reset-password`, {
+  const res = await observedFetch(`${API_URL}/auth/reset-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token, password, confirmPassword }),
@@ -144,7 +152,7 @@ export async function resetPasswordRequest(
 }
 
 export async function sessionRequest(token: string): Promise<SessionResponse> {
-  const res = await fetch(`${API_URL}/auth/me`, {
+  const res = await observedFetch(`${API_URL}/auth/me`, {
     credentials: 'include',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -152,7 +160,7 @@ export async function sessionRequest(token: string): Promise<SessionResponse> {
 }
 
 export async function refreshSessionRequest(): Promise<AuthResponse> {
-  const res = await fetch(`${API_URL}/auth/refresh`, {
+  const res = await observedFetch(`${API_URL}/auth/refresh`, {
     method: 'POST',
     credentials: 'include',
   });
@@ -160,7 +168,7 @@ export async function refreshSessionRequest(): Promise<AuthResponse> {
 }
 
 export async function logoutRequest(): Promise<void> {
-  const res = await fetch(`${API_URL}/auth/logout`, {
+  const res = await observedFetch(`${API_URL}/auth/logout`, {
     method: 'POST',
     credentials: 'include',
   });
@@ -169,8 +177,28 @@ export async function logoutRequest(): Promise<void> {
   }
 }
 
+export function lockStoredSession() { sessionLocked = true; }
+
+export async function lockSessionRequest(): Promise<void> {
+  const res = await observedFetch(`${API_URL}/auth/session/lock`, { method: 'POST', credentials: 'include' });
+  if (!res.ok && res.status !== 401) throw new Error('Não foi possível bloquear a sessão.');
+}
+
+export async function unlockSessionRequest(password: string): Promise<AuthResponse> {
+  const res = await observedFetch(`${API_URL}/auth/session/unlock`, { method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password }) });
+  return parseJsonOrThrow(res);
+}
+
+export async function touchSessionRequest(): Promise<void> {
+  const token = await ensureStoredAccessToken();
+  const res = await observedFetch(`${API_URL}/auth/session/activity`, { method: 'POST', credentials: 'include',
+    headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error('Sessão bloqueada ou expirada.');
+}
+
 export async function resetAccountDataRequest(token: string): Promise<void> {
-  const res = await fetch(`${API_URL}/account/data`, {
+  const res = await observedFetch(`${API_URL}/account/data`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -181,7 +209,7 @@ export async function resetAccountDataRequest(token: string): Promise<void> {
 }
 
 export async function exportAccountBackupRequest(token: string): Promise<AccountBackup> {
-  const res = await fetch(`${API_URL}/account/backup`, {
+  const res = await observedFetch(`${API_URL}/account/backup`, {
     credentials: 'include',
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -189,7 +217,7 @@ export async function exportAccountBackupRequest(token: string): Promise<Account
 }
 
 export async function restoreAccountBackupRequest(token: string, backup: AccountBackup): Promise<void> {
-  const res = await fetch(`${API_URL}/account/backup`, {
+  const res = await observedFetch(`${API_URL}/account/backup`, {
     method: 'PUT',
     credentials: 'include',
     headers: {
@@ -210,7 +238,7 @@ export async function changePasswordRequest(
   newPassword: string,
   confirmPassword: string,
 ): Promise<{ message: string }> {
-  const res = await fetch(`${API_URL}/account/password`, {
+  const res = await observedFetch(`${API_URL}/account/password`, {
     method: 'PATCH',
     headers: {
       Authorization: `Bearer ${token}`,

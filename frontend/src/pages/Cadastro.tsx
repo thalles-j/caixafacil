@@ -102,6 +102,10 @@ export default function Cadastro() {
           >
             <UserPlus size={16} weight="fill" /> {enviando ? 'Criando conta...' : 'Criar conta'}
           </button>
+          <p className="text-center text-[11px] leading-relaxed text-ink-soft">
+            Ao criar a conta, você declara que leu os <Link className="underline" to="/termos">Termos de Uso</Link>
+            {' '}e a <Link className="underline" to="/privacidade">Política de Privacidade</Link>.
+          </p>
         </form>
 
         <p className="mt-6 text-center text-sm text-ink-soft">

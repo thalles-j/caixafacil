@@ -1,4 +1,5 @@
 import { ensureStoredAccessToken } from './auth';
+import { observedFetch } from './observability';
 import type {
   AppData,
   CompanyConfig,
@@ -24,7 +25,7 @@ export class BusinessRequestError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit): Promise<T> {
-  const execute = (token: string) => fetch(`${API_URL}/business${path}`, {
+  const execute = (token: string) => observedFetch(`${API_URL}/business${path}`, {
       ...init,
       credentials: 'include',
       headers: {
@@ -127,6 +128,29 @@ export function registerSaleRequest(
       paymentMethod,
       customerId: paymentMethod === 'fiado' ? customerId : undefined,
     }),
+  });
+}
+
+export function registerOfflineSaleRequest(payload: {
+  items: SaleItemInput[]; paymentMethod: FormaPagamento; customerId?: string; clientSaleId: string;
+  occurredAt: string; cashSessionId: string; offline: true; expectedTenantId: string; expectedActorId: string;
+}, signal?: AbortSignal) {
+  return request<{ data: AppData; sale: { id: string; soldAt: string; duplicate?: boolean } }>('/sales', {
+    method: 'POST', signal, body: JSON.stringify(payload),
+  });
+}
+
+export function cancelSaleRequest(saleId: string, reason: string, confirmationId: string) {
+  return request<{ data: AppData }>(`/sales/${saleId}/cancel`, {
+    method: 'POST', body: JSON.stringify({ reason, confirmationId }),
+  });
+}
+
+export function returnSaleItemRequest(
+  saleId: string, itemId: string, quantity: number, reason: string, confirmationId: string,
+) {
+  return request<{ data: AppData }>(`/sales/${saleId}/returns`, {
+    method: 'POST', body: JSON.stringify({ itemId, quantity, reason, confirmationId }),
   });
 }
 

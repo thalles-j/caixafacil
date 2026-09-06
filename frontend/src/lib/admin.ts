@@ -1,4 +1,5 @@
 import { ensureStoredAccessToken } from './auth';
+import { observedFetch } from './observability';
 
 const API_URL = import.meta.env.VITE_API_URL ?? '/api';
 
@@ -24,7 +25,7 @@ export type AdminProfile = { id: string; email: string; name: string; createdAt:
 async function adminRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const execute = async (forceRefresh = false) => {
     const token = await ensureStoredAccessToken(forceRefresh);
-    return fetch(`${API_URL}/admin${path}`, {
+    return observedFetch(`${API_URL}/admin${path}`, {
       ...init,
       credentials: 'include',
       headers: {

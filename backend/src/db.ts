@@ -1,10 +1,13 @@
 import { Pool } from 'pg';
 import { readFile } from 'node:fs/promises';
+import { auditTenant, requestActor } from './tenant/audit.js';
 
 const schemaUrls = [
   new URL('../prisma/migrations/0001_init/migration.sql', import.meta.url),
   new URL('../prisma/migrations/0002_admin_panel/migration.sql', import.meta.url),
   new URL('../prisma/migrations/0003_admin_account_management/migration.sql', import.meta.url),
+  new URL('../prisma/migrations/0004_tenant_operations/migration.sql', import.meta.url),
+  new URL('../prisma/migrations/0005_privacy/migration.sql', import.meta.url),
 ];
 const configuredDatabaseUrl = process.env.DATABASE_URL;
 
@@ -85,6 +88,10 @@ export async function withTenantTransaction<T>(
     await client.query('SET LOCAL ROLE mnb_app_runtime');
     await client.query("SELECT set_config('app.current_user_id', $1, true)", [userId]);
     const result = await operation(client);
+    const actor = requestActor.getStore();
+    if (actor && actor.tenantId === userId && !['GET', 'HEAD'].includes(actor.method)) {
+      await auditTenant(client, actor, `business.${actor.method.toLowerCase()}`, actor.actorId, { path: actor.path });
+    }
     await client.query('COMMIT');
     return result;
   } catch (error) {

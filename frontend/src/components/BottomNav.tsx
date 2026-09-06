@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { House, Calculator, Package, CurrencyDollar, List, Receipt, ChartBar } from '@phosphor-icons/react';
 import { useAppData } from '../context/AppDataContext';
+import { useAuth } from '../context/AuthContext';
 
 const items = [
   { to: '/', label: 'Início', Icon: House },
@@ -10,10 +11,17 @@ const items = [
   { to: '/fechamentos', label: 'Fechamentos', Icon: Receipt },
   { to: '/relatorios', label: 'Relatórios', Icon: ChartBar },
 ];
+const operatorItems = [
+  { to: '/caixa', label: 'Caixa', Icon: Calculator },
+  { to: '/catalogo', label: 'Catálogo', Icon: Package },
+  { to: '/entradas', label: 'Vendas', Icon: Receipt },
+];
 
 export default function BottomNav({ informacoesVisiveis }: { informacoesVisiveis: boolean }) {
   useAppData();
-  const itensVisiveis = informacoesVisiveis ? items : items.filter(({ to }) => to === '/' || to === '/caixa');
+  const { user } = useAuth();
+  const itensVisiveis = user?.tenantRole === 'OPERATOR' ? operatorItems :
+    informacoesVisiveis ? items : items.filter(({ to }) => to === '/' || to === '/caixa');
 
   return (
     <>

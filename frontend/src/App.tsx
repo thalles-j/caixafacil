@@ -27,6 +27,9 @@ const AdminLayout = lazy(() => import('./components/AdminLayout'));
 const AdminClients = lazy(() => import('./pages/admin/AdminClients'));
 const AdminClientDetail = lazy(() => import('./pages/admin/AdminClientDetail'));
 const AdminSettings = lazy(() => import('./pages/admin/AdminSettings'));
+const Operadores = lazy(() => import('./pages/Operadores'));
+const Termos = lazy(() => import('./pages/Termos'));
+const Privacidade = lazy(() => import('./pages/Privacidade'));
 
 export default function App() {
   const { pathname } = useLocation();
@@ -48,6 +51,8 @@ export default function App() {
           <Route path="/cadastro" element={<Cadastro />} />
           <Route path="/recuperar-conta" element={<RecuperarConta />} />
           <Route path="/suporte" element={<Suporte />} />
+          <Route path="/termos" element={<Termos />} />
+          <Route path="/privacidade" element={<Privacidade />} />
           <Route path="/admin/*" element={<Navigate to="/login" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -71,6 +76,8 @@ export default function App() {
     );
   }
 
+  const owner = user?.tenantRole === 'OWNER';
+
   if (!onboardingConcluido) {
     return (
       <Suspense fallback={<LoadingScreen />}>
@@ -91,26 +98,29 @@ export default function App() {
         <Route path="/cadastro" element={<Navigate to="/" replace />} />
         <Route path="/onboarding" element={<Navigate to="/" replace />} />
         <Route element={<Layout />}>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/" element={owner ? <Dashboard /> : <Navigate to="/caixa" replace />} />
+          <Route path="/dashboard" element={owner ? <Dashboard /> : <Navigate to="/caixa" replace />} />
           <Route path="/caixa" element={<Caixa />} />
           <Route path="/caixa/fechamento" element={<FecharCaixa />} />
           <Route path="/catalogo" element={<Catalogo />} />
           <Route path="/estoque" element={<Navigate to="/catalogo" replace />} />
-          <Route path="/financas" element={<Financas />} />
-          <Route path="/movimentacoes" element={<Movimentacoes modo="todas" />} />
+          <Route path="/financas" element={owner ? <Financas /> : <Navigate to="/caixa" replace />} />
+          <Route path="/movimentacoes" element={owner ? <Movimentacoes modo="todas" /> : <Navigate to="/caixa" replace />} />
           <Route path="/entradas" element={<Movimentacoes modo="vendas" />} />
           <Route path="/vendas" element={<Navigate to="/entradas" replace />} />
-          <Route path="/despesas" element={<Movimentacoes modo="saidas" />} />
-          <Route path="/fechamentos" element={<Fechamentos />} />
-          <Route path="/fechamentos/semanal/:periodo" element={<RelatorioPeriodo tipo="semanal" />} />
-          <Route path="/fechamentos/mensal/:periodo" element={<RelatorioPeriodo tipo="mensal" />} />
-          <Route path="/fechamentos/:dataRelatorio" element={<RelatoriosCaixa />} />
-          <Route path="/relatorios" element={<Relatorios />} />
-          <Route path="/relatorios/diario/:dataRelatorio" element={<RelatoriosCaixa />} />
-          <Route path="/relatorios/semanal/:periodo" element={<RelatorioPeriodo tipo="semanal" />} />
-          <Route path="/relatorios/mensal/:periodo" element={<RelatorioPeriodo tipo="mensal" />} />
-          <Route path="/configuracoes" element={<Configuracoes />} />
+          <Route path="/despesas" element={owner ? <Movimentacoes modo="saidas" /> : <Navigate to="/caixa" replace />} />
+          <Route path="/fechamentos" element={owner ? <Fechamentos /> : <Navigate to="/caixa" replace />} />
+          <Route path="/fechamentos/semanal/:periodo" element={owner ? <RelatorioPeriodo tipo="semanal" /> : <Navigate to="/caixa" replace />} />
+          <Route path="/fechamentos/mensal/:periodo" element={owner ? <RelatorioPeriodo tipo="mensal" /> : <Navigate to="/caixa" replace />} />
+          <Route path="/fechamentos/:dataRelatorio" element={owner ? <RelatoriosCaixa /> : <Navigate to="/caixa" replace />} />
+          <Route path="/relatorios" element={owner ? <Relatorios /> : <Navigate to="/caixa" replace />} />
+          <Route path="/relatorios/diario/:dataRelatorio" element={owner ? <RelatoriosCaixa /> : <Navigate to="/caixa" replace />} />
+          <Route path="/relatorios/semanal/:periodo" element={owner ? <RelatorioPeriodo tipo="semanal" /> : <Navigate to="/caixa" replace />} />
+          <Route path="/relatorios/mensal/:periodo" element={owner ? <RelatorioPeriodo tipo="mensal" /> : <Navigate to="/caixa" replace />} />
+          <Route path="/configuracoes" element={owner ? <Configuracoes /> : <Navigate to="/caixa" replace />} />
+          <Route path="/operadores" element={owner ? <Operadores /> : <Navigate to="/caixa" replace />} />
+          <Route path="/termos" element={<Termos />} />
+          <Route path="/privacidade" element={<Privacidade />} />
           <Route path="/admin/*" element={<Navigate to="/dashboard" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

@@ -75,10 +75,11 @@ describe('isTokenValid', () => {
     await expect(ensureStoredAccessToken()).resolves.toBe(renovado);
     expect(getStoredToken()).toBe(renovado);
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
-    expect(fetchMock).toHaveBeenCalledWith('/api/auth/refresh', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/refresh', expect.objectContaining({
       method: 'POST',
       credentials: 'include',
-    });
+      headers: expect.any(Headers),
+    }));
   });
 });
 
@@ -94,13 +95,14 @@ describe('changePasswordRequest', () => {
     await expect(changePasswordRequest('token-seguro', 'atual123', 'nova123', 'nova123')).resolves.toEqual({
       message: 'Senha alterada com sucesso.',
     });
-    expect(fetchMock).toHaveBeenCalledWith('/api/account/password', {
+    const [, options] = fetchMock.mock.calls.find(([url]) => url === '/api/account/password')!;
+    expect(options).toMatchObject({
       method: 'PATCH',
-      headers: {
-        Authorization: 'Bearer token-seguro',
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify({ currentPassword: 'atual123', newPassword: 'nova123', confirmPassword: 'nova123' }),
     });
+    const headers = options?.headers as Headers;
+    expect(headers.get('Authorization')).toBe('Bearer token-seguro');
+    expect(headers.get('Content-Type')).toBe('application/json');
+    expect(headers.get('X-Request-ID')).toMatch(/^[0-9a-f-]{36}$/);
   });
 });

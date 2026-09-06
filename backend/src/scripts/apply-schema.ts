@@ -3,9 +3,9 @@ import { ensureSchema, pool } from '../db.js';
 
 try {
   await ensureSchema();
-  console.log('Schema PostgreSQL aplicado com sucesso.');
-} catch (error) {
-  console.error('Falha ao aplicar o schema PostgreSQL:', error);
+  process.stdout.write(JSON.stringify({ event: 'schema_applied', ok: true }) + '\n');
+} catch {
+  process.stderr.write(JSON.stringify({ event: 'schema_apply_failed', ok: false }) + '\n');
   process.exitCode = 1;
 } finally {
   await pool.end();

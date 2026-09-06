@@ -43,15 +43,20 @@ export interface CompanyConfig {
   };
   viewPeriod: ViewPeriod; // resumo do Painel Inicial: "hoje" ou "últimos 7 dias"
   onboardingConcluido: boolean;
+  idleTimeoutMinutes?: number;
+  receiptSettings?: import('./lib/printing').ReceiptSettings;
 }
 
 export interface Venda {
   id: string;
+  saleId?: string;
+  itemId?: string;
   caixaSessaoId?: string;
   data: string; // ISO date
   createdAt?: string; // instante ISO usado para ordenar vendas do mesmo dia
   descricao: string;
   quantidade: number;
+  quantidadeDevolvida?: number;
   valorUnitario: number;
   formaPagamento: FormaPagamento; // 'fiado' também cria uma Conta a receber automaticamente
   produtoId?: string;
