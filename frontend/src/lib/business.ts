@@ -140,6 +140,13 @@ export function registerOfflineSaleRequest(payload: {
   });
 }
 
+export function reportOfflineQueueStatus(pendingCount: number, oldestPendingAt: string | null) {
+  return request<void>('/offline-queue-status', {
+    method: 'PUT',
+    body: JSON.stringify({ pendingCount, oldestPendingAt }),
+  });
+}
+
 export function cancelSaleRequest(saleId: string, reason: string, confirmationId: string) {
   return request<{ data: AppData }>(`/sales/${saleId}/cancel`, {
     method: 'POST', body: JSON.stringify({ reason, confirmationId }),

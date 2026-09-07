@@ -21,7 +21,18 @@ minutos e consulta `GET /api/health` três vezes. Para habilitá-lo, configure:
 - variável `UPTIME_ENABLED=true`;
 - variável `UPTIME_HEALTH_URL=https://sua-api.example/api/health`;
 - segredos `UPTIME_ALERT_EMAIL`, `EMAIL_WEBHOOK_URL`,
-  `EMAIL_WEBHOOK_TOKEN` e `EMAIL_FROM`.
+  `EMAIL_WEBHOOK_TOKEN`, `EMAIL_FROM` e `UPTIME_REPORT_TOKEN`;
+- variável `UPTIME_REPORT_URL=https://sua-api.example/api/monitor/uptime`.
+
+O retorno do monitor grava somente estado saudável, status HTTP, indicador de
+simulação e horários. O painel `/admin` consulta esse registro a cada cinco
+minutos. A contagem recente do Sentry é um contador dos eventos enviados pela
+instância atual nos últimos 15 minutos, sem mensagens ou stack traces; ela volta
+a zero quando o processo reinicia.
+
+SUPERADMIN pode simular no painel um pico de cinco erros. A simulação altera
+somente o contador em memória, expira após 15 minutos e gera auditoria sem corpo,
+mensagem ou stack trace. Ela não envia um erro artificial ao projeto Sentry.
 
 O disparo manual possui `simulate_failure`; ele percorre o caminho real do
 provedor e marca o assunto como simulação. Execute-o antes do deploy e confirme

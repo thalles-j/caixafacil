@@ -155,6 +155,29 @@ businessRouter.get('/data', asyncRoute(async (req, res) => {
   return res.json({ data: await responseData(user) });
 }));
 
+businessRouter.put('/offline-queue-status', asyncRoute(async (req, res) => {
+  const user = requireUser(req);
+  const pendingCount = Number(req.body?.pendingCount);
+  const oldestPendingAt = req.body?.oldestPendingAt == null ? null : new Date(String(req.body.oldestPendingAt));
+  if (!Number.isInteger(pendingCount) || pendingCount < 0 || pendingCount > 10_000 ||
+      (oldestPendingAt && (Number.isNaN(oldestPendingAt.getTime()) || oldestPendingAt.getTime() > Date.now() + 60_000))) {
+    return res.status(400).json({ error: 'Resumo da fila offline inválido.' });
+  }
+  if ((pendingCount === 0) !== (oldestPendingAt === null)) {
+    return res.status(400).json({ error: 'Informe a data da pendência somente quando a fila não estiver vazia.' });
+  }
+  await withTenantTransaction(user.id, async (client) => {
+    await client.query(
+      `INSERT INTO offline_queue_status(business_id,actor_id,pending_count,oldest_pending_at,updated_at)
+       VALUES($1,$2,$3,$4,now())
+       ON CONFLICT(business_id,actor_id) DO UPDATE SET pending_count=excluded.pending_count,
+         oldest_pending_at=excluded.oldest_pending_at,updated_at=now()`,
+      [user.id, user.actorId, pendingCount, oldestPendingAt?.toISOString() ?? null],
+    );
+  }, { audit: false });
+  return res.sendStatus(204);
+}));
+
 businessRouter.post('/reports/email', asyncRoute(async (req, res) => {
   const user = requireUser(req);
   const summary = await withTenantTransaction(user.id, async (client) => {

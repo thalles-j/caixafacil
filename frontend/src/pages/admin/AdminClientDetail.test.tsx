@@ -10,10 +10,14 @@ const mocks = vi.hoisted(() => ({
   updateAdminClientStatus: vi.fn(),
   resetAdminClientPassword: vi.fn(),
   deleteAdminClient: vi.fn(),
+  updateAdminBusinessStatus: vi.fn(),
 }));
 
 vi.mock('../../lib/admin', () => ({
   ...mocks,
+}));
+vi.mock('../../context/AuthContext', () => ({
+  useAuth: () => ({ user: { id: 'admin-1', role: 'admin', adminLevel: 'SUPERADMIN' } }),
 }));
 
 import AdminClientDetail from './AdminClientDetail';
@@ -27,7 +31,11 @@ const client = {
   createdAt: '2026-01-01T12:00:00.000Z',
   updatedAt: '2026-01-01T12:00:00.000Z',
   onboardingCompleted: true,
-  usage: { products: 1, sales: 2, cashClosings: 3, customers: 4, openCredits: 5 },
+  businessCount: 1,
+  activeBusinessCount: 1,
+  availableBusinessSlots: 2,
+  maxBusinesses: 3,
+  businesses: [{ id: 'business-1', name: 'Loja Ana', category: 'Varejo', offering: 'produtos', status: 'active', createdAt: '2026-01-01T12:00:00.000Z', operatorCount: 1 }],
 };
 
 describe('poderes administrativos no detalhe do cliente', () => {
@@ -39,6 +47,7 @@ describe('poderes administrativos no detalhe do cliente', () => {
     mocks.updateAdminClientStatus.mockReset();
     mocks.resetAdminClientPassword.mockReset();
     mocks.deleteAdminClient.mockReset();
+    mocks.updateAdminBusinessStatus.mockReset();
   });
 
   afterEach(cleanup);
@@ -50,10 +59,10 @@ describe('poderes administrativos no detalhe do cliente', () => {
       </MemoryRouter>,
     );
 
-    await screen.findByRole('heading', { name: 'Loja Ana' });
+    await screen.findByRole('heading', { name: 'Loja Ana', level: 1 });
     fireEvent.click(screen.getByRole('button', { name: /Alterar nome/ }));
 
-    const confirmButton = screen.getByRole('button', { name: 'Confirmar alteração' }) as HTMLButtonElement;
+    const confirmButton = screen.getByRole('button', { name: 'Confirmar ação' }) as HTMLButtonElement;
     expect(confirmButton.disabled).toBe(true);
 
     const inputs = screen.getAllByRole('textbox') as HTMLInputElement[];
@@ -65,6 +74,25 @@ describe('poderes administrativos no detalhe do cliente', () => {
     await waitFor(() => expect(mocks.updateAdminClientName).toHaveBeenCalledWith(
       'client-1', 'Mercado Ana', 'Loja Ana',
     ));
-    expect(await screen.findByRole('heading', { name: 'Mercado Ana' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Mercado Ana', level: 1 })).toBeTruthy();
+  });
+
+  it('permite mostrar e ocultar a nova senha', async () => {
+    render(
+      <MemoryRouter initialEntries={['/admin/clients/client-1']}>
+        <Routes><Route path="/admin/clients/:id" element={<AdminClientDetail />} /></Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByRole('heading', { name: 'Loja Ana', level: 1 });
+    fireEvent.click(screen.getByRole('button', { name: 'Nova senha' }));
+
+    const password = screen.getByLabelText('Nova senha') as HTMLInputElement;
+    const confirmation = screen.getByLabelText('Confirmar senha') as HTMLInputElement;
+    expect(password.type).toBe('password');
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar senhas' }));
+    expect(password.type).toBe('text');
+    expect(confirmation.type).toBe('text');
+    fireEvent.click(screen.getByRole('button', { name: 'Ocultar senhas' }));
+    expect(password.type).toBe('password');
   });
 });

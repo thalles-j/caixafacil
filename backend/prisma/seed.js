@@ -107,6 +107,7 @@ async function applySchema() {
     './migrations/0004_tenant_operations/migration.sql',
     './migrations/0005_privacy/migration.sql',
     './migrations/0006_multi_business/migration.sql',
+    './migrations/0007_admin_platform/migration.sql',
   ];
   for (const migrationPath of migrationPaths) {
     const schema = await readFile(new URL(migrationPath, import.meta.url), 'utf8');
@@ -570,21 +571,22 @@ async function seedTenant(client, user, passwordHash, operatorPasswordHash) {
   }
 }
 
-async function seedAdmin(client, admin, passwordHash) {
+async function seedAdmin(client, admin, passwordHash, adminLevel) {
   await client.query('BEGIN');
   try {
     await client.query(
-      `INSERT INTO users (email, password_hash, name, role, status)
-       VALUES ($1, $2, $3, 'admin', 'active')
+      `INSERT INTO users (email, password_hash, name, role, status, admin_level)
+       VALUES ($1, $2, $3, 'admin', 'active', $4)
        ON CONFLICT (email) DO UPDATE SET
          password_hash = EXCLUDED.password_hash,
          name = EXCLUDED.name,
-         role = 'admin',
-         status = 'active',
+          role = 'admin',
+          status = 'active',
+          admin_level = EXCLUDED.admin_level,
          token_version = users.token_version + 1,
          updated_at = now()
        RETURNING id`,
-      [admin.email, passwordHash, admin.name],
+      [admin.email, passwordHash, admin.name, adminLevel],
     );
     await client.query('COMMIT');
   } catch (error) {
@@ -623,8 +625,8 @@ async function main() {
         `${summary.creditSales} fiados e ${summary.auditEvents} eventos de auditoria.`,
       );
     }
-    for (const admin of ADMIN_USERS) {
-      await seedAdmin(client, admin, adminPasswordHash);
+    for (const [index, admin] of ADMIN_USERS.entries()) {
+      await seedAdmin(client, admin, adminPasswordHash, index === 0 ? 'SUPERADMIN' : 'SUPPORT');
       console.log(`Conta administrativa ${admin.email} criada/atualizada sem dados de negócio.`);
     }
   } finally {

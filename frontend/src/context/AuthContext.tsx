@@ -25,6 +25,7 @@ interface AuthUser {
   id: string;
   email: string;
   role: 'client' | 'admin';
+  adminLevel?: 'SUPPORT' | 'SUPERADMIN' | 'REVOKED' | null;
   name?: string | null;
   tenantId?: string | null;
   tenantRole?: 'OWNER' | 'OPERATOR' | null;

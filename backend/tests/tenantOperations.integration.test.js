@@ -269,7 +269,7 @@ describe('operações de tenant no PostgreSQL', () => {
     const second=listed.body.businesses.find(item=>item.id!==OWNER_A);
     await pool.query(`INSERT INTO sales(id,user_id,business_id,payment_method,total_amount,sold_at)
       VALUES('cccccccc-cccc-4ccc-8ccc-cccccccccccc',$1,$2,'pix',37,now())`,[OWNER_A,second.id]);
-    const day=new Date().toISOString().slice(0,10);
+    const day=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Sao_Paulo'}).format(new Date());
     const report=await request(app).get(`/api/businesses/report?start=${day}&end=${day}`).set(bearer(tokenOwnerA)).expect(200);
     const manual=(await pool.query(`SELECT COALESCE(sum(total_amount-returned_amount),0) total FROM sales
       WHERE business_id=ANY($1::uuid[]) AND status='completed'`,[listed.body.businesses.map(item=>item.id)])).rows[0].total;

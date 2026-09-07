@@ -27,9 +27,26 @@ frontend.
   ativações; o operador acessa catálogo, caixa, clientes e vendas do caixa aberto,
   inclusive devoluções confirmadas, sem relatórios,
   configurações, backup ou administração da conta.
-- Painel `/admin` protegido por papel, com gestão de contas de clientes,
-  alteração de nome, redefinição de senha, suspensão, exclusão, estatísticas
-  agregadas e log de auditoria. Ações sensíveis exigem redigitar o nome alvo.
+- Painel `/admin` com níveis internos `SUPPORT` e `SUPERADMIN`. A visão geral
+  oferece períodos de 7, 30 e 90 dias, distribuição de negócios por conta,
+  adoção agregada de multiempresa, operadores, consentimento WhatsApp e fila
+  offline, além de sinais de health check, Sentry, uptime e filas antigas.
+- A listagem mostra negócios ativos/limite por conta. O detalhe lista somente
+  metadados dos negócios vinculados: nome, ramo, oferta, criação, estado e
+  quantidade de operadores. Não retorna linhas de catálogo, vendas, clientes
+  finais ou fiado.
+- `SUPPORT` consulta contas, negócios e auditoria e redefine senhas.
+  `SUPERADMIN` também altera nomes, suspende ou exclui contas, arquiva ou reativa
+  um negócio específico e gerencia níveis da equipe administrativa. A API
+  revalida o nível no banco em cada chamada; esconder botões não é a barreira de
+  autorização.
+- Suspensão e exclusão continuam tendo escopo de conta inteira: login, sessões
+  e todos os negócios. O arquivamento administrativo tem escopo de um negócio,
+  exige redigitar seu nome, revoga suas sessões e preserva pelo menos um negócio
+  ativo por conta. Todas essas ações geram auditoria.
+- A auditoria administrativa possui filtros por ator, ação, alvo e datas,
+  paginação de 25 eventos e exportação CSV exatamente da página filtrada visível.
+  Os detalhes retornados passam por lista positiva de campos.
 - Onboarding para produtos, serviços ou ambos.
 - Tela “Meus negócios” com criação, onboarding independente, troca imediata,
   renomeação, arquivamento confirmado pelo nome e resumos diário/mensal.
@@ -58,6 +75,14 @@ frontend.
   o desbloqueio exige a senha do ator e preserva o carrinho local.
 - Logs JSON correlacionados e Sentry usam lista positiva sem corpos, tokens ou
   dados pessoais. O monitor externo de `/api/health` possui alerta simulado.
+- O painel operacional atualiza sob demanda e a cada cinco minutos. A contagem
+  de erros representa eventos capturados pela instância da API nos últimos 15
+  minutos; reinicia junto com o processo. O último uptime é informado pelo
+  monitor externo em `/api/monitor/uptime` com token próprio. A fila offline
+  envia somente negócio, ator, quantidade pendente e data da pendência mais
+  antiga, sem conteúdo da venda.
+- SUPERADMIN pode simular um pico no contador operacional. A simulação expira
+  após 15 minutos, aparece identificada no retorno e gera registro de auditoria.
 - O health check confirma também a conexão com o PostgreSQL. Rotas ausentes,
   JSON malformado, payload excessivo, UUIDs e períodos inválidos retornam JSON
   com códigos HTTP 404, 400 ou 413, sem devolver detalhes internos do erro.

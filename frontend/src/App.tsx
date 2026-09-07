@@ -28,6 +28,8 @@ const AdminLayout = lazy(() => import('./components/AdminLayout'));
 const AdminClients = lazy(() => import('./pages/admin/AdminClients'));
 const AdminClientDetail = lazy(() => import('./pages/admin/AdminClientDetail'));
 const AdminSettings = lazy(() => import('./pages/admin/AdminSettings'));
+const AdminAudit = lazy(() => import('./pages/admin/AdminAudit'));
+const AdminTeam = lazy(() => import('./pages/admin/AdminTeam'));
 const Operadores = lazy(() => import('./pages/Operadores'));
 const Termos = lazy(() => import('./pages/Termos'));
 const Privacidade = lazy(() => import('./pages/Privacidade'));
@@ -72,6 +74,8 @@ export default function App() {
             <Route path="/admin" element={<AdminClients />} />
             <Route path="/admin/clients/:id" element={<AdminClientDetail />} />
             <Route path="/admin/configuracoes" element={<AdminSettings />} />
+            <Route path="/admin/auditoria" element={<AdminAudit />} />
+            <Route path="/admin/equipe" element={user.adminLevel === 'SUPERADMIN' ? <AdminTeam /> : <Navigate to="/admin" replace />} />
           </Route>
           <Route path="*" element={<Navigate to="/admin" replace />} />
         </Routes>

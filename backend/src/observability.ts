@@ -10,6 +10,34 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const trace = /^[0-9a-f]{32}$/i;
 const errorNames = new Set(['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'URIError', 'AggregateError']);
 let initialized = false;
+const capturedErrorTimes: number[] = [];
+const simulatedErrorTimes: number[] = [];
+
+function rememberCapturedError(): void {
+  const now = Date.now();
+  capturedErrorTimes.push(now);
+  while (capturedErrorTimes[0] < now - 24 * 60 * 60 * 1000) capturedErrorTimes.shift();
+}
+
+export function getOperationalErrorSnapshot() {
+  const now = Date.now();
+  return {
+    configured: Boolean(process.env.SENTRY_DSN),
+    recentErrors: capturedErrorTimes.filter((time) => time >= now - 15 * 60 * 1000).length,
+    recentSimulatedErrors: simulatedErrorTimes.filter((time) => time >= now - 15 * 60 * 1000).length,
+    windowMinutes: 15,
+    source: 'captured-events' as const,
+  };
+}
+
+export function simulateOperationalErrorSpike(count: number): ReturnType<typeof getOperationalErrorSnapshot> {
+  const now = Date.now();
+  for (let index = 0; index < count; index += 1) {
+    capturedErrorTimes.push(now);
+    simulatedErrorTimes.push(now);
+  }
+  return getOperationalErrorSnapshot();
+}
 
 function safeErrorName(value: unknown): string {
   return typeof value === 'string' && errorNames.has(value) ? value : 'Error';
@@ -128,6 +156,7 @@ export function captureRequestError(error: unknown, req: Request, res: Response)
   // Validation failures are operational events, not unhandled application errors.
   let eventId: string | undefined;
   if (!(status >= 400 && status < 500)) {
+    rememberCapturedError();
     Sentry.withScope((scope) => {
       if (correlation) scope.setTags({ request_id: correlation.request_id, trace_id: correlation.trace_id });
       eventId = Sentry.captureException(error);
@@ -145,6 +174,7 @@ export function captureRequestError(error: unknown, req: Request, res: Response)
 }
 
 export async function captureFatalError(error: unknown, event: 'server_error' | 'database_error'): Promise<void> {
+  rememberCapturedError();
   const eventId = Sentry.captureException(error, { mechanism: { handled: false, type: 'auto.node.global_handlers' } });
   logEvent('error', event, { event_id: eventId, error_name: error instanceof Error ? error.name : 'Error' });
   await Sentry.flush(2000);

@@ -95,6 +95,7 @@ export interface SalesQueueOptions {
   send(sale: PendingSale, signal: AbortSignal): Promise<void>;
   isOnline?: () => boolean;
   store?: SalesQueueStore;
+  reportStatus?(pendingCount: number, oldestPendingAt: string | null): Promise<void>;
 }
 
 /** One instance per authenticated provider. Dispose it when identity changes. */
@@ -128,7 +129,12 @@ export class OfflineSalesQueue {
   async refresh(): Promise<void> {
     if (!this.active() || !this.identity) return;
     const pending = await this.store.list(this.identity);
-    if (this.active()) this.update({ pending: pending.length, online: this.online() });
+    if (this.active()) {
+      this.update({ pending: pending.length, online: this.online() });
+      if (this.online() && this.options.reportStatus) {
+        void this.options.reportStatus(pending.length, pending[0]?.payload.occurredAt ?? null).catch(() => undefined);
+      }
+    }
   }
 
   async pendingSales(): Promise<PendingSale[]> {

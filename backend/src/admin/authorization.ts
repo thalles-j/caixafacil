@@ -3,7 +3,8 @@ import { verifyToken, type TokenPayload } from '../auth/jwt.js';
 import { validateSession } from '../auth/session.js';
 import { requestActor } from '../tenant/audit.js';
 
-export type AdminResponseLocals = { auth?: TokenPayload };
+export type AdminLevel = 'SUPPORT' | 'SUPERADMIN';
+export type AdminResponseLocals = { auth?: TokenPayload; adminLevel?: AdminLevel };
 
 export function authenticateAccessToken(req: Request, res: Response<unknown, AdminResponseLocals>, next: NextFunction) {
   const header = req.headers.authorization;

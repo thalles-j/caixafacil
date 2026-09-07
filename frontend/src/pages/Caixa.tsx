@@ -22,7 +22,7 @@ import type { Cliente, FormaPagamento } from '../types';
 import Modal from '../components/Modal';
 import { useAuth } from '../context/AuthContext';
 import { OfflineSalesQueue } from '../lib/offlineSales';
-import { registerOfflineSaleRequest } from '../lib/business';
+import { registerOfflineSaleRequest, reportOfflineQueueStatus } from '../lib/business';
 import { APP_DATA_CHANGED_EVENT } from '../lib/storage';
 import OfflineStatus from '../components/OfflineStatus';
 import ReceiptActions from '../components/ReceiptActions';
@@ -89,6 +89,7 @@ export default function Caixa() {
       const response = await registerOfflineSaleRequest(sale.payload, signal);
       window.dispatchEvent(new CustomEvent(APP_DATA_CHANGED_EVENT, { detail: response.data }));
     },
+    reportStatus: reportOfflineQueueStatus,
   }), [locked, user]);
   useEffect(() => offlineQueue.start(), [offlineQueue]);
   const tiposCatalogoPermitidos = useMemo(

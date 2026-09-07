@@ -33,7 +33,7 @@ dados de cada estabelecimento no backend e no PostgreSQL.
 | **Financeiro** | Fiado, recebimentos, despesas fixas, movimentações, relatórios por período e histórico de caixa |
 | **Equipe** | Contas de operador vinculadas a um único negócio e permissões limitadas à rotina do caixa |
 | **Privacidade** | Consentimento versionado para cobrança por WhatsApp e anonimização de dados pessoais |
-| **Administração** | Painel separado para contas da plataforma, suspensão, redefinição de senha e auditoria |
+| **Administração** | Painel multiempresa com níveis SUPPORT/SUPERADMIN, métricas agregadas, alertas, suspensão, redefinição de senha e auditoria filtrável |
 | **Operação** | Health check com banco, logs correlacionados, integração opcional com Sentry e monitor de disponibilidade |
 
 ## Perfis de acesso
@@ -43,8 +43,10 @@ dados de cada estabelecimento no backend e no PostgreSQL.
 - **OPERATOR:** acessa catálogo, clientes, caixa e vendas do estabelecimento ao
   qual está vinculado. Não acessa relatórios consolidados, backups ou gestão da
   conta.
-- **ADMIN:** gerencia metadados e estatísticas agregadas das contas da
-  plataforma, sem acesso às transações individuais dos estabelecimentos.
+- **SUPPORT:** consulta metadados de contas e negócios, auditoria e redefine
+  senhas, sem acesso a ações destrutivas.
+- **SUPERADMIN:** reúne os poderes de suporte e gerencia suspensões, exclusões,
+  arquivamento de negócios e níveis administrativos.
 
 ## Arquitetura
 

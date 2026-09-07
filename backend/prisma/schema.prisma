@@ -22,6 +22,7 @@ model users {
   token_version Int      @default(0)
   role          String   @default("client")
   account_kind  String   @default("owner")
+  admin_level   String?
   status        String   @default("active")
   name          String?
   created_at    DateTime @default(now()) @db.Timestamptz(6)
@@ -307,4 +308,23 @@ model business_memberships {
 
   @@id([user_id, business_id])
   @@index([business_id, role, active], map: "idx_business_memberships_business")
+}
+
+model offline_queue_status {
+  business_id       String    @db.Uuid
+  actor_id          String    @db.Uuid
+  pending_count     Int       @default(0)
+  oldest_pending_at DateTime? @db.Timestamptz(6)
+  updated_at        DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@id([business_id, actor_id])
+}
+
+model platform_monitor_status {
+  monitor_name String   @id
+  healthy      Boolean
+  http_status  String
+  simulated    Boolean  @default(false)
+  checked_at   DateTime @db.Timestamptz(6)
+  received_at  DateTime @default(now()) @db.Timestamptz(6)
 }

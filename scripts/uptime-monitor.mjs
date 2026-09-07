@@ -9,6 +9,18 @@ function configuredUrl(value, field) {
   return url;
 }
 
+async function reportStatus(env, fetcher, payload) {
+  if (!env.UPTIME_REPORT_URL || !env.UPTIME_REPORT_TOKEN) return;
+  const reportUrl = configuredUrl(env.UPTIME_REPORT_URL, 'UPTIME_REPORT_URL');
+  if (reportUrl.pathname !== '/api/monitor/uptime') throw new Error('UPTIME_REPORT_URL deve apontar para /api/monitor/uptime.');
+  const response = await fetcher(reportUrl, {
+    method: 'POST', signal: AbortSignal.timeout(10_000), redirect: 'error',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${env.UPTIME_REPORT_TOKEN}` },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error('A API recusou o relatório do monitor.');
+}
+
 /** Runs on an external scheduler, independent of the monitored API and its database. */
 export async function runUptimeCheck(env = process.env, dependencies = {}) {
   const fetcher = dependencies.fetch ?? fetch;
@@ -27,7 +39,10 @@ export async function runUptimeCheck(env = process.env, dependencies = {}) {
       if (env.UPTIME_SIMULATE_FAILURE === 'true') throw new Error('simulation');
       const response = await fetcher(healthUrl, { signal: AbortSignal.timeout(10_000), redirect: 'error' });
       status = String(response.status);
-      if (response.ok && (await response.json())?.ok === true) return { healthy: true, alerted: false };
+      if (response.ok && (await response.json())?.ok === true) {
+        await reportStatus(env, fetcher, { healthy: true, httpStatus: String(response.status), simulated: false, checkedAt: new Date().toISOString() });
+        return { healthy: true, alerted: false };
+      }
     } catch {
       // Network exceptions may contain credentials/URLs; use an enumerated status only.
       status = 'unreachable';
@@ -50,6 +65,7 @@ export async function runUptimeCheck(env = process.env, dependencies = {}) {
     }),
   });
   if (!alertResponse.ok) throw new Error('O provedor recusou o alerta de uptime. Verifique a execução do monitor.');
+  await reportStatus(env, fetcher, { healthy: false, httpStatus: status, simulated, checkedAt: new Date().toISOString() });
   return { healthy: false, alerted: true, simulated };
 }
 

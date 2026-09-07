@@ -36,3 +36,5 @@ jobs:
           EMAIL_WEBHOOK_TOKEN: ${{ secrets.EMAIL_WEBHOOK_TOKEN }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           UPTIME_SIMULATE_FAILURE: ${{ inputs.simulate_failure && 'true' || 'false' }}
+          UPTIME_REPORT_URL: ${{ vars.UPTIME_REPORT_URL }}
+          UPTIME_REPORT_TOKEN: ${{ secrets.UPTIME_REPORT_TOKEN }}

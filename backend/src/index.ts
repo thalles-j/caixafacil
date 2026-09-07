@@ -11,6 +11,7 @@ import { supportRouter } from './support/routes.js';
 import { privacyRouter } from './privacy/routes.js';
 import { operatorRouter } from './tenant/operators.js';
 import { businessesRouter } from './businesses/routes.js';
+import { monitorRouter } from './monitor/routes.js';
 import { captureFatalError, captureRequestError, initObservability, logEvent, requestObservability } from './observability.js';
 
 initObservability();
@@ -75,6 +76,7 @@ app.get('/api/health', async (_req, res, next) => {
 });
 app.use('/api/auth', authRouter);
 app.use('/api/support', supportRouter);
+app.use('/api/monitor', monitorRouter);
 app.use('/api/account', accountRouter);
 app.use('/api/business', businessRouter);
 app.use('/api/admin', adminRouter);

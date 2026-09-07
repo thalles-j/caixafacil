@@ -3,6 +3,7 @@ import { pool } from '../db.js';
 
 export type SessionUser = {
   id: string; email: string; name: string | null; role: 'client' | 'admin';
+  admin_level: 'SUPPORT' | 'SUPERADMIN' | 'REVOKED' | null;
   token_version: number; status: string; password_hash: string;
   tenant_id: string | null; tenant_role: 'OWNER' | 'OPERATOR' | null;
   membership_active: boolean | null; owner_status: string | null; owner_user_id: string | null;
@@ -29,12 +30,13 @@ export async function sessionUser(id: string, businessId?: string): Promise<Sess
 }
 
 export function activeUser(user: SessionUser | undefined): user is SessionUser {
-  return !!user && user.status === 'active' && (user.role === 'admin' ||
+  return !!user && user.status === 'active' && ((user.role === 'admin' && user.admin_level !== 'REVOKED') ||
     (!!user.tenant_id && !!user.tenant_role && user.membership_active === true && user.owner_status === 'active'));
 }
 
 export function publicUser(user: SessionUser) {
   return { id: user.id, email: user.email, name: user.name, role: user.role,
+    adminLevel: user.role === 'admin' ? user.admin_level : undefined,
     tenantId: user.tenant_id, tenantRole: user.tenant_role, businessName:user.business_name,
     idleTimeoutMinutes: user.idle_timeout_minutes };
 }
