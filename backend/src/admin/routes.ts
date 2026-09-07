@@ -163,7 +163,12 @@ adminRouter.get('/stats', adminReadLimit, asyncRoute(async (req, res) => {
       operatorsPercent: Number(row.operators_percent ?? 0),
       offlineQueuePercent: Number(row.offline_percent ?? 0),
     },
-    newAccountsSeries: series.rows.map((item) => ({ period: String(item.period), total: item.total })),
+    newAccountsSeries: series.rows.map((item) => ({
+      period: item.period instanceof Date
+        ? item.period.toISOString().slice(0, 10)
+        : String(item.period).slice(0, 10),
+      total: item.total,
+    })),
   });
 }));
 

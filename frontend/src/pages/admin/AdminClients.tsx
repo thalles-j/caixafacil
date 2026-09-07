@@ -11,6 +11,12 @@ import { useAuth } from '../../context/AuthContext';
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium' });
 const dateTimeFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
+function periodLabel(value: string): string {
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T12:00:00Z` : value;
+  const date = new Date(isoDate);
+  return Number.isNaN(date.getTime()) ? 'Período inválido' : dateFormatter.format(date);
+}
+
 export default function AdminClients() {
   const { user } = useAuth();
   const [items, setItems] = useState<AdminClientSummary[]>([]);
@@ -52,9 +58,9 @@ export default function AdminClients() {
   }, []);
 
   const submitSearch = (event: FormEvent) => { event.preventDefault(); setPage(1); setSearch(draftSearch.trim()); };
-  const maxSeries = Math.max(1, ...(stats?.newAccountsSeries.map((item) => item.total) ?? [1]));
-  const recentErrors = operations?.sentry.recentErrors ?? 0;
-  const simulatedErrors = operations?.sentry.recentSimulatedErrors ?? 0;
+  const maxSeries = Math.max(1, ...(stats?.newAccountsSeries?.map((item) => item.total) ?? [1]));
+  const recentErrors = operations?.sentry?.recentErrors ?? 0;
+  const simulatedErrors = operations?.sentry?.recentSimulatedErrors ?? 0;
   const cards = [
     { label: 'Contas ativas', value: stats?.active ?? 0, Icon: ShieldCheck, tone: 'text-ledger-strong dark:text-ledger bg-ledger/10' },
     { label: 'Negócios', value: stats?.businesses ?? 0, Icon: Buildings, tone: 'text-brass bg-brass/10' },
@@ -81,16 +87,16 @@ export default function AdminClients() {
         <section className="rounded-2xl border border-line bg-paper-raised p-5 shadow-sm">
           <h2 className="font-display text-lg font-bold">Novas contas</h2>
           <div className="mt-5 flex h-40 items-end gap-2" aria-label="Gráfico de novas contas por período">
-            {stats?.newAccountsSeries.length ? stats.newAccountsSeries.map((item) => <div key={item.period} className="flex min-w-0 flex-1 flex-col items-center gap-2"><span className="text-xs font-bold">{item.total}</span><div className="w-full rounded-t-md bg-ledger" style={{ height: `${Math.max(6, item.total / maxSeries * 110)}px` }} /><span className="max-w-full truncate text-[10px] text-ink-soft">{dateFormatter.format(new Date(`${item.period}T12:00:00Z`))}</span></div>) : <p className="m-auto text-sm text-ink-soft">Nenhuma conta nova no período.</p>}
+            {stats?.newAccountsSeries?.length ? stats.newAccountsSeries.map((item) => <div key={item.period} className="flex min-w-0 flex-1 flex-col items-center gap-2"><span className="text-xs font-bold">{item.total}</span><div className="w-full rounded-t-md bg-ledger" style={{ height: `${Math.max(6, item.total / maxSeries * 110)}px` }} /><span className="max-w-full truncate text-[10px] text-ink-soft">{periodLabel(item.period)}</span></div>) : <p className="m-auto text-sm text-ink-soft">Nenhuma conta nova no período.</p>}
           </div>
         </section>
         <section className="rounded-2xl border border-line bg-paper-raised p-5 shadow-sm">
           <h2 className="font-display text-lg font-bold">Distribuição e adoção</h2>
           <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-            {[['1 negócio', stats?.distribution.one ?? 0], ['2 negócios', stats?.distribution.two ?? 0], ['3 negócios', stats?.distribution.three ?? 0]].map(([label, value]) => <div key={label} className="rounded-xl bg-paper p-3"><p className="font-ledger text-xl font-bold">{value}</p><p className="text-[11px] text-ink-soft">{label}</p></div>)}
+            {[['1 negócio', stats?.distribution?.one ?? 0], ['2 negócios', stats?.distribution?.two ?? 0], ['3 negócios', stats?.distribution?.three ?? 0]].map(([label, value]) => <div key={label} className="rounded-xl bg-paper p-3"><p className="font-ledger text-xl font-bold">{value}</p><p className="text-[11px] text-ink-soft">{label}</p></div>)}
           </div>
           <dl className="mt-4 grid gap-2 sm:grid-cols-2">
-            {[['Mais de um negócio', stats?.adoption.multiBusinessPercent], ['Consentimento WhatsApp', stats?.adoption.whatsappConsentPercent], ['Com operadores', stats?.adoption.operatorsPercent], ['Usaram fila offline', stats?.adoption.offlineQueuePercent]].map(([label, value]) => <div key={label} className="flex items-center justify-between rounded-lg border border-line px-3 py-2 text-sm"><dt className="text-ink-soft">{label}</dt><dd className="font-ledger font-bold">{Number(value ?? 0).toLocaleString('pt-BR')}%</dd></div>)}
+            {[['Mais de um negócio', stats?.adoption?.multiBusinessPercent], ['Consentimento WhatsApp', stats?.adoption?.whatsappConsentPercent], ['Com operadores', stats?.adoption?.operatorsPercent], ['Usaram fila offline', stats?.adoption?.offlineQueuePercent]].map(([label, value]) => <div key={label} className="flex items-center justify-between rounded-lg border border-line px-3 py-2 text-sm"><dt className="text-ink-soft">{label}</dt><dd className="font-ledger font-bold">{Number(value ?? 0).toLocaleString('pt-BR')}%</dd></div>)}
           </dl>
         </section>
       </div>
@@ -98,10 +104,10 @@ export default function AdminClients() {
       <section className="rounded-2xl border border-line bg-paper-raised p-5 shadow-sm">
         <div className="flex items-center justify-between gap-3"><div><h2 className="font-display text-lg font-bold">Alertas operacionais</h2><p className="text-xs text-ink-soft">Atualização automática a cada 5 minutos.</p></div><WarningCircle size={24} className="text-brass" /></div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Status label="API e PostgreSQL" value={operations?.health.ok ? 'Operacionais' : 'Indisponíveis'} healthy={operations?.health.ok === true} />
-          <Status label={`Erros em ${operations?.sentry.windowMinutes ?? 15} min`} value={recentErrors > 0 ? `${recentErrors}${simulatedErrors ? ` (${simulatedErrors} simulados)` : ''}` : operations?.sentry.configured ? '0' : 'Sentry não configurado'} healthy={recentErrors > 0 ? false : operations?.sentry.configured ? true : undefined} />
+          <Status label="API e PostgreSQL" value={operations?.health?.ok ? 'Operacionais' : operations ? 'Indisponíveis' : 'Carregando'} healthy={operations?.health?.ok} />
+          <Status label={`Erros em ${operations?.sentry?.windowMinutes ?? 15} min`} value={recentErrors > 0 ? `${recentErrors}${simulatedErrors ? ` (${simulatedErrors} simulados)` : ''}` : operations?.sentry?.configured ? '0' : 'Sentry não configurado'} healthy={recentErrors > 0 ? false : operations?.sentry?.configured ? true : undefined} />
           <Status label="Último uptime" value={operations?.uptime ? `${operations.uptime.healthy ? 'Saudável' : 'Falha'} · ${dateTimeFormatter.format(new Date(operations.uptime.checkedAt))}` : 'Sem retorno'} healthy={operations?.uptime?.healthy} />
-          <Status label="Filas pendentes há +4h" value={String(operations?.offlineQueues.accountsWithStalePending ?? 0)} healthy={(operations?.offlineQueues.accountsWithStalePending ?? 0) === 0} />
+          <Status label="Filas pendentes há +4h" value={String(operations?.offlineQueues?.accountsWithStalePending ?? 0)} healthy={(operations?.offlineQueues?.accountsWithStalePending ?? 0) === 0} />
         </div>
         {user?.adminLevel === 'SUPERADMIN' && <button type="button" disabled={simulating} onClick={() => {
           setSimulating(true);
