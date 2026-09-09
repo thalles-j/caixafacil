@@ -437,7 +437,9 @@ export default function Financas() {
                           {formatCurrency(conta.valor)}
                         </p>
                         <div className="flex items-center gap-1">
-                          {!conta.quitado && conta.tipo === 'receber' && cliente && <WhatsAppChargeButton customerId={cliente.id} />}
+                          {!conta.quitado && conta.tipo === 'receber' && cliente && (
+                            <WhatsAppChargeButton customerId={cliente.id} customerName={cliente.nome} />
+                          )}
                           {!conta.quitado && (
                             <button
                               onClick={() => {
@@ -540,7 +542,7 @@ export default function Financas() {
                         </div>
                         <span className="shrink-0 font-ledger font-bold tabular-nums text-brass">{formatCurrency(c.total)}</span>
                       </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-3"><WhatsAppChargeButton customerId={c.id} />
+                      <div className="mt-2 flex flex-wrap items-center gap-3"><WhatsAppChargeButton customerId={c.id} customerName={c.nome} />
                         <CustomerPrivacyActions customerId={c.id} customerName={c.nome} canAnonymize={user?.tenantRole === 'OWNER'} />
                       </div>
                     </li>
