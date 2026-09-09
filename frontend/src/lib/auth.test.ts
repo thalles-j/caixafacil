@@ -81,6 +81,18 @@ describe('isTokenValid', () => {
       headers: expect.any(Headers),
     }));
   });
+
+  it('mantém o token no sessionStorage por no máximo quinze minutos', () => {
+    const exp = Math.floor(Date.now() / 1000) + 3600;
+    const token = fakeToken({ sub: 'user-1', email: 'a@b.com', iat: 0, exp });
+
+    setStoredToken(token);
+
+    expect(getStoredToken()).toBe(token);
+    expect(JSON.parse(sessionStorage.getItem('caixafacil-auth-token')!).expiresAt).toBeLessThanOrEqual(
+      Date.now() + 15 * 60_000,
+    );
+  });
 });
 
 describe('changePasswordRequest', () => {

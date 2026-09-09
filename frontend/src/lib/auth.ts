@@ -3,6 +3,8 @@ import { observedFetch } from './observability';
 
 /** Chave legada, mantida apenas para remover tokens gravados por versões antigas. */
 export const TOKEN_KEY = 'mnb-auth-token';
+export const SESSION_TOKEN_KEY = 'caixafacil-auth-token';
+const SESSION_TOKEN_TTL_MS = 15 * 60_000;
 let accessTokenInMemory: string | null = null;
 let sessionLocked = false;
 
@@ -11,6 +13,35 @@ function removeLegacyStoredToken() {
     localStorage.removeItem(TOKEN_KEY);
   } catch {
     // A sessão HTTP-only continua funcionando quando o armazenamento é bloqueado.
+  }
+}
+
+function removeSessionToken() {
+  try {
+    sessionStorage.removeItem(SESSION_TOKEN_KEY);
+  } catch {
+    // A sessão em memória continua funcionando quando o armazenamento é bloqueado.
+  }
+}
+
+function restoreSessionToken(): string | null {
+  try {
+    const raw = sessionStorage.getItem(SESSION_TOKEN_KEY);
+    if (!raw) return null;
+    const stored = JSON.parse(raw) as { token?: unknown; expiresAt?: unknown };
+    if (
+      typeof stored.token !== 'string' ||
+      typeof stored.expiresAt !== 'number' ||
+      stored.expiresAt <= Date.now() ||
+      !isTokenValid(stored.token)
+    ) {
+      removeSessionToken();
+      return null;
+    }
+    return stored.token;
+  } catch {
+    removeSessionToken();
+    return null;
   }
 }
 
@@ -42,22 +73,40 @@ export function isTokenValid(token: string | null): token is string {
 }
 
 export function getStoredToken(): string | null {
-  // O refresh token HTTP-only restaura a sessão após recarregar a página.
-  // O access token não precisa ficar acessível em armazenamento persistente.
   removeLegacyStoredToken();
-  return sessionLocked ? null : accessTokenInMemory;
+  if (sessionLocked) return null;
+  if (accessTokenInMemory && isTokenValid(accessTokenInMemory)) return accessTokenInMemory;
+  accessTokenInMemory = restoreSessionToken();
+  return accessTokenInMemory;
 }
 
 export function setStoredToken(token: string) {
   accessTokenInMemory = token;
   sessionLocked = false;
   removeLegacyStoredToken();
+  const payload = decodeToken(token);
+  if (!payload || !isTokenValid(token)) {
+    removeSessionToken();
+    return;
+  }
+  try {
+    sessionStorage.setItem(
+      SESSION_TOKEN_KEY,
+      JSON.stringify({
+        token,
+        expiresAt: Math.min(payload.exp * 1000, Date.now() + SESSION_TOKEN_TTL_MS),
+      }),
+    );
+  } catch {
+    // A sessão em memória continua funcionando quando o armazenamento é bloqueado.
+  }
 }
 
 export function clearStoredToken() {
   accessTokenInMemory = null;
   sessionLocked = false;
   removeLegacyStoredToken();
+  removeSessionToken();
 }
 
 let refreshInFlight: Promise<AuthResponse> | null = null;
