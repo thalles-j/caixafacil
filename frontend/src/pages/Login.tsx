@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Headset, Lock, Storefront } from '@phosphor-icons/react';
+import { ArrowLeft, Eye, EyeSlash, Headset, Lock, Storefront } from '@phosphor-icons/react';
 import { useAuth } from '../context/AuthContext';
 import LoadingScreen from '../components/LoadingScreen';
 import { postLoginPath } from '../lib/roles';
@@ -10,6 +10,7 @@ export default function Login() {
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
+  const [mostrarSenha, setMostrarSenha] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
 
@@ -65,15 +66,21 @@ export default function Login() {
                 Esqueci minha senha
               </Link>
             </div>
+            <div className="relative">
             <input
-              type="password"
+              type={mostrarSenha ? 'text' : 'password'}
               required
               maxLength={72}
+              autoComplete="current-password"
               value={senha}
               onChange={(e) => setSenha(e.target.value)}
               placeholder="••••••••"
-              className="w-full rounded-lg border border-line bg-paper p-2.5 text-sm text-ink focus:border-ledger focus:outline-none focus:ring-2 focus:ring-ledger/30"
+              className="w-full rounded-lg border border-line bg-paper py-2.5 pl-2.5 pr-11 text-sm text-ink focus:border-ledger focus:outline-none focus:ring-2 focus:ring-ledger/30"
             />
+            <button type="button" onClick={() => setMostrarSenha((visivel) => !visivel)} aria-label={mostrarSenha ? 'Ocultar senha' : 'Mostrar senha'} className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-ink-soft hover:text-ink">
+              {mostrarSenha ? <Eye size={19} /> : <EyeSlash size={19} />}
+            </button>
+            </div>
           </div>
 
           {erro && (
@@ -104,6 +111,9 @@ export default function Login() {
       <Link to="/suporte" className="mt-5 inline-flex items-center gap-1.5 text-sm font-semibold text-ink-soft transition hover:text-ink">
         <Headset size={17} /> Precisa de ajuda? Fale com o suporte
       </Link>
+      <p className="mt-3 text-xs text-ink-soft">
+        <Link className="underline" to="/termos">Termos</Link> · <Link className="underline" to="/privacidade">Privacidade</Link>
+      </p>
     </div>
   );
 }

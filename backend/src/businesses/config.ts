@@ -1,0 +1,1 @@
+export const MAX_BUSINESSES_PER_OWNER = 3;

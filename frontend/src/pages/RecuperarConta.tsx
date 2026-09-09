@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle, EnvelopeSimple, Headset, Key } from '@phosphor-icons/react';
+import { ArrowLeft, CheckCircle, EnvelopeSimple, Eye, EyeSlash, Headset, Key } from '@phosphor-icons/react';
 import { forgotPasswordRequest, resetPasswordRequest } from '../lib/auth';
 import { PASSWORD_HINT, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, passwordPolicyError } from '../lib/passwordPolicy';
 
@@ -10,6 +10,7 @@ export default function RecuperarConta() {
   const [token, setToken] = useState(searchParams.get('token') ?? '');
   const [senha, setSenha] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
+  const [mostrarSenhas, setMostrarSenhas] = useState(false);
   const [mensagem, setMensagem] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
@@ -97,8 +98,9 @@ export default function RecuperarConta() {
           <form className="space-y-4" onSubmit={alterarSenha}>
             <div>
               <label className="mb-1 block text-xs font-medium text-ink-soft">Nova senha</label>
+              <div className="relative">
               <input
-                type="password"
+                type={mostrarSenhas ? 'text' : 'password'}
                 required
                 minLength={PASSWORD_MIN_LENGTH}
                 maxLength={PASSWORD_MAX_LENGTH}
@@ -106,13 +108,17 @@ export default function RecuperarConta() {
                 value={senha}
                 onChange={(event) => setSenha(event.target.value)}
                 placeholder={PASSWORD_HINT}
-                className="w-full rounded-lg border border-line bg-paper p-2.5 text-sm text-ink focus:border-ledger focus:outline-none focus:ring-2 focus:ring-ledger/30"
+                className="w-full rounded-lg border border-line bg-paper py-2.5 pl-2.5 pr-11 text-sm text-ink focus:border-ledger focus:outline-none focus:ring-2 focus:ring-ledger/30"
               />
+              <button type="button" onClick={() => setMostrarSenhas((visivel) => !visivel)} aria-label={mostrarSenhas ? 'Ocultar senhas' : 'Mostrar senhas'} className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-ink-soft hover:text-ink">
+                {mostrarSenhas ? <Eye size={19} /> : <EyeSlash size={19} />}
+              </button>
+              </div>
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-ink-soft">Confirmar nova senha</label>
               <input
-                type="password"
+                type={mostrarSenhas ? 'text' : 'password'}
                 required
                 minLength={PASSWORD_MIN_LENGTH}
                 maxLength={PASSWORD_MAX_LENGTH}

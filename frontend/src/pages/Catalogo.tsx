@@ -8,6 +8,7 @@ import { paginateItems } from '../lib/pagination';
 import { sortCatalogItems, type OrdenacaoCatalogo } from '../lib/catalogSorting';
 import { catalogTypesForOffer, defaultCatalogType } from '../lib/offering';
 import type { CategoriaProduto, Produto } from '../types';
+import { useAuth } from '../context/AuthContext';
 
 type TipoFiltro = 'todos' | 'product' | 'service';
 type Filtro = 'todos' | 'baixo' | string;
@@ -28,6 +29,8 @@ function obterTipoItem(item: Produto): 'product' | 'service' {
 }
 
 export default function Catalogo() {
+  const { user } = useAuth();
+  const isOwner = user?.tenantRole === 'OWNER';
   const {
     data,
     addProduto,
@@ -274,7 +277,7 @@ export default function Catalogo() {
           <h2 className="font-display text-xl font-bold">Catálogo</h2>
           <p className="truncate text-sm text-ink-soft">Gerencie produtos e serviços com o mesmo visual do app.</p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        {isOwner && <div className="flex shrink-0 items-center gap-2">
           <button
             onClick={() => {
               setCategoriasModalAberto(true);
@@ -290,7 +293,7 @@ export default function Catalogo() {
           >
             <Plus size={16} /> Novo
           </button>
-        </div>
+        </div>}
       </div>
 
       <div className="mb-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_auto_auto]">
@@ -394,12 +397,12 @@ export default function Catalogo() {
             <p className="mb-4 text-xs text-ink-soft">
               Cadastre {oferta === 'servicos' ? 'serviços' : oferta === 'produtos' ? 'produtos' : 'produtos ou serviços'} para começar.
             </p>
-            <button
+            {isOwner && <button
               onClick={abrirNovo}
               className="flex items-center gap-2 rounded-lg bg-ledger px-4 py-2 text-sm font-medium text-paper transition hover:bg-ledger-strong"
             >
               <Plus size={16} /> Cadastrar item
-            </button>
+            </button>}
           </div>
         ) : (
           <div className="rounded-2xl border border-dashed border-line bg-paper-raised p-8 text-center text-ink-soft shadow-sm">
@@ -455,7 +458,7 @@ export default function Catalogo() {
                   )}
                 </div>
 
-                <div className="flex gap-2">
+                {isOwner && <div className="flex gap-2">
                   <button
                     onClick={() => abrirEdicao(item)}
                     className="flex-1 rounded-full border border-ledger/30 bg-ledger/10 px-4 py-2 text-xs font-semibold text-ledger-strong transition hover:bg-ledger/20 dark:text-ledger"
@@ -468,7 +471,7 @@ export default function Catalogo() {
                   >
                     Excluir
                   </button>
-                </div>
+                </div>}
               </div>
             );
           })}

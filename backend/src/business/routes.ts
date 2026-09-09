@@ -5,9 +5,13 @@ import { loadBootstrapData } from './bootstrap.js';
 import { sendEmail } from '../email.js';
 import { authenticateAccessToken } from '../admin/authorization.js';
 import { requireClient } from '../admin/requireAdmin.js';
+import { authorizeBusiness } from '../tenant/authorization.js';
+import { auditTenant } from '../tenant/audit.js';
+import crypto from 'node:crypto';
+import { loadOperatorData } from '../tenant/data.js';
 
 type AsyncRoute = (req: Request, res: Response, next: NextFunction) => Promise<unknown>;
-type AuthenticatedUser = { id: string; email: string };
+type AuthenticatedUser = { id: string; actorId: string; email: string; tenantRole: 'OWNER' | 'OPERATOR' };
 
 const PAYMENT_METHODS = new Set(['dinheiro', 'pix', 'cartao_credito', 'cartao_debito']);
 const SALE_PAYMENT_METHODS = new Set([...PAYMENT_METHODS, 'fiado']);
@@ -31,7 +35,7 @@ const REPORT_FREQUENCIES = new Set(['semanal', 'mensal', 'ambos', 'nenhum']);
 const VIEW_PERIODS = new Set(['day', 'week']);
 
 export const businessRouter = Router();
-businessRouter.use(authenticateAccessToken, requireClient);
+businessRouter.use(authenticateAccessToken, requireClient, authorizeBusiness);
 
 function asyncRoute(handler: AsyncRoute) {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -45,7 +49,8 @@ function authenticatedUser(req: Request): AuthenticatedUser | null {
   if (!token) return null;
   try {
     const payload = verifyToken(token);
-    return { id: payload.sub, email: payload.email };
+    if (!payload.tenantId || !payload.tenantRole) return null;
+    return { id: payload.tenantId, actorId: payload.sub, email: payload.email, tenantRole: payload.tenantRole };
   } catch {
     return null;
   }
@@ -96,7 +101,7 @@ async function categoryIdByName(
   const name = optionalText(categoryName, 80);
   if (!name) return null;
   const result = await client.query(
-    'SELECT id FROM categories WHERE user_id = $1 AND lower(name) = lower($2)',
+    'SELECT id FROM categories WHERE business_id = $1 AND lower(name) = lower($2)',
     [userId, name],
   );
   if (!result.rowCount) {
@@ -107,7 +112,7 @@ async function categoryIdByName(
 
 async function currentOpenSession(client: import('pg').PoolClient, userId: string) {
   const result = await client.query(
-    `SELECT id FROM cash_sessions WHERE user_id = $1 AND status = 'open' FOR SHARE`,
+    `SELECT id FROM cash_sessions WHERE business_id = $1 AND status = 'open' FOR SHARE`,
     [userId],
   );
   if (!result.rowCount) {
@@ -120,7 +125,9 @@ async function currentOpenSession(client: import('pg').PoolClient, userId: strin
 }
 
 async function responseData(user: AuthenticatedUser) {
-  return loadBootstrapData({ id: user.id, email: user.email, name: null });
+  return user.tenantRole === 'OPERATOR'
+    ? loadOperatorData(user.id)
+    : loadBootstrapData({ id: user.id, email: user.email, name: null });
 }
 
 async function refreshClosedCashSnapshot(
@@ -134,11 +141,11 @@ async function refreshClosedCashSnapshot(
      SET expected_balance = cs.opening_balance + COALESCE((
        SELECT SUM(CASE WHEN t.type = 'entrada' THEN t.amount ELSE -t.amount END)
        FROM transactions t
-       WHERE t.user_id = cs.user_id
+       WHERE t.business_id = cs.business_id
          AND t.cash_session_id = cs.id
          AND t.payment_method = 'dinheiro'
      ), 0)
-     WHERE cs.user_id = $1 AND cs.id = $2 AND cs.status = 'closed'`,
+     WHERE cs.business_id = $1 AND cs.id = $2 AND cs.status = 'closed'`,
     [userId, cashSessionId],
   );
 }
@@ -148,11 +155,34 @@ businessRouter.get('/data', asyncRoute(async (req, res) => {
   return res.json({ data: await responseData(user) });
 }));
 
+businessRouter.put('/offline-queue-status', asyncRoute(async (req, res) => {
+  const user = requireUser(req);
+  const pendingCount = Number(req.body?.pendingCount);
+  const oldestPendingAt = req.body?.oldestPendingAt == null ? null : new Date(String(req.body.oldestPendingAt));
+  if (!Number.isInteger(pendingCount) || pendingCount < 0 || pendingCount > 10_000 ||
+      (oldestPendingAt && (Number.isNaN(oldestPendingAt.getTime()) || oldestPendingAt.getTime() > Date.now() + 60_000))) {
+    return res.status(400).json({ error: 'Resumo da fila offline inválido.' });
+  }
+  if ((pendingCount === 0) !== (oldestPendingAt === null)) {
+    return res.status(400).json({ error: 'Informe a data da pendência somente quando a fila não estiver vazia.' });
+  }
+  await withTenantTransaction(user.id, async (client) => {
+    await client.query(
+      `INSERT INTO offline_queue_status(business_id,actor_id,pending_count,oldest_pending_at,updated_at)
+       VALUES($1,$2,$3,$4,now())
+       ON CONFLICT(business_id,actor_id) DO UPDATE SET pending_count=excluded.pending_count,
+         oldest_pending_at=excluded.oldest_pending_at,updated_at=now()`,
+      [user.id, user.actorId, pendingCount, oldestPendingAt?.toISOString() ?? null],
+    );
+  }, { audit: false });
+  return res.sendStatus(204);
+}));
+
 businessRouter.post('/reports/email', asyncRoute(async (req, res) => {
   const user = requireUser(req);
   const summary = await withTenantTransaction(user.id, async (client) => {
     const settingsResult = await client.query(
-      `SELECT business_name, report_email FROM business_settings WHERE user_id = $1`,
+      `SELECT business_name, report_email FROM business_settings WHERE business_id = $1`,
       [user.id],
     );
     const settings = settingsResult.rows[0];
@@ -164,7 +194,7 @@ businessRouter.post('/reports/email', asyncRoute(async (req, res) => {
          COALESCE(SUM(amount) FILTER (WHERE type = 'saida'), 0) AS expenses,
          COUNT(*)::integer AS movements
        FROM transactions
-       WHERE user_id = $1 AND occurred_at >= date_trunc('day', now())`,
+       WHERE business_id = $1 AND occurred_at >= date_trunc('day', now())`,
       [user.id],
     );
     return { ...totalsResult.rows[0], recipient, businessName: settings.business_name };
@@ -190,18 +220,27 @@ businessRouter.put('/settings', asyncRoute(async (req, res) => {
   const dailyGoal = req.body?.metaDiariaVendas === undefined || req.body?.metaDiariaVendas === null
     ? null
     : nonNegativeMoney(req.body.metaDiariaVendas, 'Meta diária');
+  const idleTimeout = Number(req.body?.idleTimeoutMinutes ?? 15);
+  const receiptInput = req.body?.receiptSettings ?? {};
+  const receiptSettings = {
+    paperWidth: receiptInput.paperWidth === 58 ? 58 : 80,
+    legalName: optionalText(receiptInput.legalName, 160),
+    showOperator: receiptInput.showOperator !== false,
+    showPaymentMethod: receiptInput.showPaymentMethod !== false,
+  };
   if (!OFFERINGS.has(offering)) throw Object.assign(new Error('Oferta do negócio inválida.'), { status: 400 });
   if (!REPORT_FREQUENCIES.has(reportFrequency)) throw Object.assign(new Error('Frequência de relatório inválida.'), { status: 400 });
   if (!VIEW_PERIODS.has(viewPeriod)) throw Object.assign(new Error('Período do painel inválido.'), { status: 400 });
+  if (!Number.isInteger(idleTimeout) || idleTimeout < 1 || idleTimeout > 120) throw Object.assign(new Error('Tempo de inatividade inválido.'), { status: 400 });
 
   await withTenantTransaction(user.id, async (client) => {
     await client.query(
       `INSERT INTO business_settings
-        (user_id, business_name, business_category, offering, controls_stock,
+        (business_id, business_name, business_category, offering, controls_stock,
          daily_sales_goal, report_frequency, report_by_email, report_email,
-         view_period, onboarding_completed)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       ON CONFLICT (user_id) DO UPDATE SET
+         view_period, onboarding_completed,idle_timeout_minutes,receipt_settings)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,$12,$13::jsonb)
+       ON CONFLICT (business_id) DO UPDATE SET
          business_name = EXCLUDED.business_name,
          business_category = EXCLUDED.business_category,
          offering = EXCLUDED.offering,
@@ -211,7 +250,9 @@ businessRouter.put('/settings', asyncRoute(async (req, res) => {
          report_by_email = EXCLUDED.report_by_email,
          report_email = EXCLUDED.report_email,
          view_period = EXCLUDED.view_period,
-         onboarding_completed = EXCLUDED.onboarding_completed`,
+         onboarding_completed = EXCLUDED.onboarding_completed,
+         idle_timeout_minutes = EXCLUDED.idle_timeout_minutes,
+         receipt_settings = EXCLUDED.receipt_settings`,
       [
         user.id,
         name,
@@ -224,8 +265,12 @@ businessRouter.put('/settings', asyncRoute(async (req, res) => {
         optionalText(req.body?.relatorio?.email, 254),
         viewPeriod,
         req.body?.onboardingConcluido === true,
+        idleTimeout,
+        JSON.stringify(receiptSettings),
       ],
     );
+    await client.query('UPDATE businesses SET name=$2,category=$3,offering=$4,updated_at=now() WHERE id=$1',
+      [user.id,name,category,offering]);
   });
   return res.json({ data: await responseData(user) });
 }));
@@ -252,7 +297,7 @@ businessRouter.patch('/categories/:id', asyncRoute(async (req, res) => {
   try {
     await withTenantTransaction(user.id, async (client) => {
       const result = await client.query(
-        'UPDATE categories SET name = $3 WHERE user_id = $1 AND id = $2',
+        'UPDATE categories SET name = $3 WHERE business_id = $1 AND id = $2',
         [user.id, req.params.id, name],
       );
       if (!result.rowCount) throw Object.assign(new Error('Categoria não encontrada.'), { status: 404 });
@@ -269,8 +314,8 @@ businessRouter.patch('/categories/:id', asyncRoute(async (req, res) => {
 businessRouter.delete('/categories/:id', asyncRoute(async (req, res) => {
   const user = requireUser(req);
   await withTenantTransaction(user.id, async (client) => {
-    await client.query('UPDATE products SET category_id = NULL WHERE user_id = $1 AND category_id = $2', [user.id, req.params.id]);
-    const result = await client.query('DELETE FROM categories WHERE user_id = $1 AND id = $2', [user.id, req.params.id]);
+    await client.query('UPDATE products SET category_id = NULL WHERE business_id = $1 AND category_id = $2', [user.id, req.params.id]);
+    const result = await client.query('DELETE FROM categories WHERE business_id = $1 AND id = $2', [user.id, req.params.id]);
     if (!result.rowCount) throw Object.assign(new Error('Categoria não encontrada.'), { status: 404 });
   });
   return res.json({ data: await responseData(user) });
@@ -295,7 +340,7 @@ async function saveProduct(req: Request, user: AuthenticatedUser, productId?: st
           `UPDATE products SET kind = $3, name = $4, barcode = $5, category_id = $6,
              sale_price = $7, cost_price = $8, stock_quantity = $9,
              minimum_quantity = $10, service_duration = $11::interval
-           WHERE user_id = $1 AND id = $2 AND active`,
+           WHERE business_id = $1 AND id = $2 AND active`,
           [user.id, productId, kind, name, barcode, categoryId, salePrice, cost, stock, minimum, duration],
         );
         if (!result.rowCount) throw Object.assign(new Error('Item não encontrado.'), { status: 404 });
@@ -336,7 +381,7 @@ businessRouter.delete('/products/:id', asyncRoute(async (req, res) => {
   const user = requireUser(req);
   await withTenantTransaction(user.id, async (client) => {
     const result = await client.query(
-      'UPDATE products SET active = false WHERE user_id = $1 AND id = $2 AND active',
+      'UPDATE products SET active = false WHERE business_id = $1 AND id = $2 AND active',
       [user.id, req.params.id],
     );
     if (!result.rowCount) throw Object.assign(new Error('Item não encontrado.'), { status: 404 });
@@ -368,6 +413,18 @@ businessRouter.post('/sales', asyncRoute(async (req, res) => {
   const paymentMethod = String(req.body?.paymentMethod ?? '');
   const customerId = req.body?.customerId ? String(req.body.customerId) : null;
   const items = Array.isArray(req.body?.items) ? req.body.items : [];
+  const clientSaleId = req.body?.clientSaleId ? String(req.body.clientSaleId) : null;
+  const offline = req.body?.offline === true;
+  const requestedSessionId = req.body?.cashSessionId ? String(req.body.cashSessionId) : null;
+  const occurredAt = req.body?.occurredAt ? new Date(String(req.body.occurredAt)) : new Date();
+  if (clientSaleId && !/^[0-9a-f-]{36}$/i.test(clientSaleId)) throw Object.assign(new Error('Identificador idempotente inválido.'), { status: 400 });
+  if (!Number.isFinite(occurredAt.getTime()) || occurredAt.getTime() > Date.now() + 60_000 || occurredAt.getTime() < Date.now() - 7 * 86_400_000) {
+    throw Object.assign(new Error('Data da venda offline fora da janela permitida.'), { status: 400 });
+  }
+  const requestHash = crypto.createHash('sha256').update(JSON.stringify({ paymentMethod, customerId, items, requestedSessionId, occurredAt: occurredAt.toISOString() })).digest('hex');
+  if (offline && (req.body?.expectedTenantId !== user.id || req.body?.expectedActorId !== user.actorId)) {
+    throw Object.assign(new Error('A fila offline pertence a outra sessão ou operador.'), { status: 409, code: 'OFFLINE_IDENTITY_CHANGED' });
+  }
 
   if (!SALE_PAYMENT_METHODS.has(paymentMethod)) {
     throw Object.assign(new Error('Forma de pagamento inválida.'), { status: 400 });
@@ -380,8 +437,20 @@ businessRouter.post('/sales', asyncRoute(async (req, res) => {
   }
   if (items.length === 0) throw Object.assign(new Error('Adicione ao menos um item.'), { status: 400 });
 
+  let createdSale: { id: string; soldAt: string; duplicate?: boolean } | undefined;
   await withTenantTransaction(user.id, async (client) => {
+    if (clientSaleId) {
+      const duplicate = await client.query('SELECT id,sold_at,request_hash FROM sales WHERE business_id=$1 AND client_sale_id=$2 FOR SHARE', [user.id, clientSaleId]);
+      if (duplicate.rowCount) {
+        if (duplicate.rows[0].request_hash !== requestHash) throw Object.assign(new Error('O identificador da venda já foi usado com outro conteúdo.'), { status: 409 });
+        createdSale = { id: duplicate.rows[0].id, soldAt: new Date(duplicate.rows[0].sold_at).toISOString(), duplicate: true };
+        return;
+      }
+    }
     const sessionId = await currentOpenSession(client, user.id);
+    if (requestedSessionId && requestedSessionId !== sessionId) {
+      throw Object.assign(new Error('O caixa da venda offline não está mais aberto.'), { status: 409, code: 'OFFLINE_CASH_CHANGED' });
+    }
     const normalizedItems: Array<{
       productId: string | null;
       description: string;
@@ -400,7 +469,7 @@ businessRouter.post('/sales', asyncRoute(async (req, res) => {
       if (productId) {
         const productResult = await client.query(
           `SELECT id, kind, name, cost_price, stock_quantity
-             FROM products WHERE user_id = $1 AND id = $2 AND active FOR UPDATE`,
+             FROM products WHERE business_id = $1 AND id = $2 AND active FOR UPDATE`,
           [user.id, productId],
         );
         if (!productResult.rowCount) {
@@ -412,7 +481,7 @@ businessRouter.post('/sales', asyncRoute(async (req, res) => {
         if (product.kind === 'product') {
           const update = await client.query(
             `UPDATE products SET stock_quantity = stock_quantity - $3
-             WHERE user_id = $1 AND id = $2 AND stock_quantity >= $3`,
+             WHERE business_id = $1 AND id = $2 AND stock_quantity >= $3`,
             [user.id, productId, quantity],
           );
           if (!update.rowCount) {
@@ -427,12 +496,14 @@ businessRouter.post('/sales', asyncRoute(async (req, res) => {
     const total = normalizedItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const saleResult = await client.query(
       `INSERT INTO sales
-        (cash_session_id, customer_id, description, payment_method, total_amount)
-       VALUES ($1, $2, $3, $4, $5)
+        (cash_session_id, customer_id, description, payment_method, total_amount,actor_id,actor_name,client_sale_id,request_hash,sold_at)
+       VALUES ($1, $2, $3, $4, $5,$6,$7,$8,$9,$10)
        RETURNING id, sold_at`,
-      [sessionId, customerId, normalizedItems.map((item) => item.description).join(', '), paymentMethod, total],
+      [sessionId, customerId, normalizedItems.map((item) => item.description).join(', '), paymentMethod, total,
+        user.actorId, user.email, clientSaleId, clientSaleId ? requestHash : null, occurredAt],
     );
     const sale = saleResult.rows[0];
+    createdSale = { id: sale.id, soldAt: new Date(sale.sold_at).toISOString() };
 
     for (const item of normalizedItems) {
       await client.query(
@@ -459,7 +530,81 @@ businessRouter.post('/sales', asyncRoute(async (req, res) => {
     }
   });
 
-  return res.status(201).json({ data: await responseData(user) });
+  return res.status(createdSale?.duplicate ? 200 : 201).json({ data: await responseData(user), sale: createdSale });
+}));
+
+function cancellationReason(value: unknown): string {
+  const reason = String(value ?? '').trim();
+  if (reason.length < 3 || reason.length > 500) throw Object.assign(new Error('Informe o motivo do cancelamento ou devolução.'), { status: 400 });
+  return reason;
+}
+
+businessRouter.post('/sales/:id/cancel', asyncRoute(async (req, res) => {
+  const user = requireUser(req);
+  const saleId = String(req.params.id);
+  const reason = cancellationReason(req.body?.reason);
+  if (req.body?.confirmationId !== saleId) throw Object.assign(new Error('Digite o número da venda para confirmar.'), { status: 400 });
+  await withTenantTransaction(user.id, async client => {
+    const result = await client.query('SELECT * FROM sales WHERE business_id=$1 AND id=$2 FOR UPDATE', [user.id, saleId]);
+    const sale = result.rows[0];
+    if (!sale) throw Object.assign(new Error('Venda não encontrada.'), { status: 404 });
+    if (sale.status !== 'completed') throw Object.assign(new Error('A venda já foi cancelada.'), { status: 409 });
+    if (sale.payment_method === 'fiado') {
+      const credit = await client.query('SELECT id,paid_amount FROM credit_sales WHERE business_id=$1 AND sale_id=$2 FOR UPDATE', [user.id, saleId]);
+      if (Number(credit.rows[0]?.paid_amount) > 0) throw Object.assign(new Error('Estorne os recebimentos do fiado antes de cancelar a venda.'), { status: 409 });
+      await client.query('DELETE FROM credit_sales WHERE business_id=$1 AND sale_id=$2', [user.id, saleId]);
+    } else {
+      await client.query(`DELETE FROM transactions WHERE business_id=$1 AND sale_id=$2 AND source='venda'`, [user.id, saleId]);
+    }
+    await client.query(`UPDATE products p SET stock_quantity=p.stock_quantity+x.quantity FROM (
+      SELECT product_id,SUM(quantity-returned_quantity) quantity FROM sale_items
+      WHERE business_id=$1 AND sale_id=$2 AND product_id IS NOT NULL GROUP BY product_id) x
+      WHERE p.business_id=$1 AND p.id=x.product_id AND p.stock_quantity IS NOT NULL`, [user.id, saleId]);
+    await client.query('UPDATE sales SET status=\'cancelled\',cancelled_at=now(),returned_amount=total_amount WHERE business_id=$1 AND id=$2', [user.id, saleId]);
+    await auditTenant(client, { tenantId: user.id, actorId: user.actorId, actorRole: user.tenantRole }, 'sale.cancelled', saleId, { reason });
+  });
+  return res.json({ data: await responseData(user) });
+}));
+
+businessRouter.post('/sales/:id/returns', asyncRoute(async (req, res) => {
+  const user = requireUser(req);
+  const saleId = String(req.params.id);
+  const itemId = String(req.body?.itemId ?? '');
+  const quantity = positiveMoney(req.body?.quantity, 'Quantidade devolvida');
+  const reason = cancellationReason(req.body?.reason);
+  if (req.body?.confirmationId !== saleId) throw Object.assign(new Error('Digite o número da venda para confirmar.'), { status: 400 });
+  await withTenantTransaction(user.id, async client => {
+    const result = await client.query(`SELECT s.payment_method,s.cash_session_id,s.total_amount,s.returned_amount,
+      si.product_id,si.product_name,si.quantity,si.returned_quantity,si.unit_price
+      FROM sales s JOIN sale_items si ON si.business_id=s.business_id AND si.sale_id=s.id
+      WHERE s.business_id=$1 AND s.id=$2 AND si.id=$3 AND s.status='completed' FOR UPDATE OF s,si`, [user.id, saleId, itemId]);
+    const item = result.rows[0];
+    if (!item) throw Object.assign(new Error('Venda ou item não encontrado.'), { status: 404 });
+    if (quantity > Number(item.quantity) - Number(item.returned_quantity)) throw Object.assign(new Error('Quantidade devolvida excede o saldo do item.'), { status: 409 });
+    const refund = Math.round(quantity * Number(item.unit_price) * 100) / 100;
+    if (refund >= Number(item.total_amount) - Number(item.returned_amount)) throw Object.assign(new Error('Use o cancelamento total para devolver toda a venda.'), { status: 409 });
+    await client.query('UPDATE sales SET returned_amount=returned_amount+$3 WHERE business_id=$1 AND id=$2', [user.id, saleId, refund]);
+    if (item.payment_method === 'fiado') {
+      const credit = await client.query('SELECT id,amount,paid_amount FROM credit_sales WHERE business_id=$1 AND sale_id=$2 FOR UPDATE', [user.id, saleId]);
+      if (!credit.rowCount || Number(credit.rows[0].amount) - refund < Number(credit.rows[0].paid_amount)) {
+        throw Object.assign(new Error('A devolução é menor que o valor já recebido do fiado.'), { status: 409 });
+      }
+      await client.query('UPDATE credit_sales SET amount=amount-$3,returned_amount=returned_amount+$3 WHERE business_id=$1 AND sale_id=$2', [user.id, saleId, refund]);
+    } else {
+      // O livro mantém uma única entrada líquida vinculada à venda. Isso evita
+      // que um cancelamento posterior deixe uma saída de devolução órfã.
+      const transaction = await client.query(
+        `UPDATE transactions SET amount=amount-$3
+         WHERE business_id=$1 AND sale_id=$2 AND source='venda' AND amount>$3 RETURNING id`,
+        [user.id, saleId, refund],
+      );
+      if (!transaction.rowCount) throw Object.assign(new Error('Lançamento financeiro da venda não permite este estorno.'), { status: 409 });
+    }
+    await client.query('UPDATE sale_items SET returned_quantity=returned_quantity+$4 WHERE business_id=$1 AND sale_id=$2 AND id=$3', [user.id, saleId, itemId, quantity]);
+    if (item.product_id) await client.query('UPDATE products SET stock_quantity=stock_quantity+$3 WHERE business_id=$1 AND id=$2 AND stock_quantity IS NOT NULL', [user.id, item.product_id, quantity]);
+    await auditTenant(client, { tenantId: user.id, actorId: user.actorId, actorRole: user.tenantRole }, 'sale.item_returned', saleId, { itemId, quantity, amount: refund, reason });
+  });
+  return res.json({ data: await responseData(user) });
 }));
 
 businessRouter.post('/transactions', asyncRoute(async (req, res) => {
@@ -539,7 +684,7 @@ businessRouter.patch('/transactions/:id/identification', asyncRoute(async (req, 
     const transactionResult = await client.query(
       `SELECT id, type, cash_session_id
        FROM transactions
-       WHERE user_id = $1 AND id = $2
+       WHERE business_id = $1 AND id = $2
          AND source IN ('ajuste', 'despesa_avulsa')
          AND identification_pending
        FOR UPDATE`,
@@ -562,7 +707,7 @@ businessRouter.patch('/transactions/:id/identification', asyncRoute(async (req, 
         await client.query(
           `UPDATE transactions
            SET entry_kind = 'gorjeta', amount = COALESCE($3, amount), identification_pending = false
-           WHERE user_id = $1 AND id = $2`,
+           WHERE business_id = $1 AND id = $2`,
           [user.id, req.params.id, correctedAmount],
         );
         await refreshClosedCashSnapshot(client, user.id, transaction.cash_session_id);
@@ -579,7 +724,7 @@ businessRouter.patch('/transactions/:id/identification', asyncRoute(async (req, 
       const productResult = await client.query(
         `SELECT id, kind, name, stock_quantity
          FROM products
-         WHERE user_id = $1 AND id = $2 AND active
+         WHERE business_id = $1 AND id = $2 AND active
          FOR UPDATE`,
         [user.id, productId],
       );
@@ -609,7 +754,7 @@ businessRouter.patch('/transactions/:id/identification', asyncRoute(async (req, 
         const stockUpdate = await client.query(
           `UPDATE products
            SET stock_quantity = stock_quantity - $3
-           WHERE user_id = $1 AND id = $2 AND stock_quantity >= $3`,
+           WHERE business_id = $1 AND id = $2 AND stock_quantity >= $3`,
           [user.id, productId, quantity],
         );
         if (!stockUpdate.rowCount) {
@@ -620,7 +765,7 @@ businessRouter.patch('/transactions/:id/identification', asyncRoute(async (req, 
       await client.query(
         `UPDATE transactions
          SET entry_kind = $3, description = $4, amount = COALESCE($5, amount), identification_pending = false
-         WHERE user_id = $1 AND id = $2`,
+         WHERE business_id = $1 AND id = $2`,
         [
           user.id,
           req.params.id,
@@ -643,7 +788,7 @@ businessRouter.patch('/transactions/:id/identification', asyncRoute(async (req, 
     await client.query(
       `UPDATE transactions
        SET expense_kind = $3, amount = COALESCE($4, amount), identification_pending = false
-       WHERE user_id = $1 AND id = $2`,
+       WHERE business_id = $1 AND id = $2`,
       [user.id, req.params.id, classification, correctedAmount],
     );
     await refreshClosedCashSnapshot(client, user.id, transaction.cash_session_id);
@@ -679,7 +824,7 @@ businessRouter.delete('/fixed-expenses/:id', asyncRoute(async (req, res) => {
   await withTenantTransaction(user.id, async (client) => {
     const result = await client.query(
       `UPDATE fixed_expenses SET active = false
-       WHERE user_id = $1 AND id = $2 AND active`,
+       WHERE business_id = $1 AND id = $2 AND active`,
       [user.id, req.params.id],
     );
     if (!result.rowCount) throw Object.assign(new Error('Conta fixa não encontrada.'), { status: 404 });
@@ -698,8 +843,8 @@ businessRouter.post('/credits/:id/pay', asyncRoute(async (req, res) => {
     const creditResult = await client.query(
       `SELECT cs.id, cs.amount - cs.paid_amount AS outstanding, c.name
        FROM credit_sales cs
-       JOIN customers c ON c.user_id = cs.user_id AND c.id = cs.customer_id
-       WHERE cs.user_id = $1 AND cs.id = $2 AND cs.status <> 'pago'
+       JOIN customers c ON c.business_id = cs.business_id AND c.id = cs.customer_id
+       WHERE cs.business_id = $1 AND cs.id = $2 AND cs.status <> 'pago'
        FOR UPDATE OF cs`,
       [user.id, req.params.id],
     );
@@ -724,7 +869,7 @@ businessRouter.post('/fixed-expenses/:id/pay', asyncRoute(async (req, res) => {
   await withTenantTransaction(user.id, async (client) => {
     const expenseResult = await client.query(
       `SELECT id, description, amount, recurrence FROM fixed_expenses
-       WHERE user_id = $1 AND id = $2 AND active FOR UPDATE`,
+       WHERE business_id = $1 AND id = $2 AND active FOR UPDATE`,
       [user.id, req.params.id],
     );
     if (!expenseResult.rowCount) throw Object.assign(new Error('Conta fixa não encontrada.'), { status: 404 });
@@ -732,14 +877,14 @@ businessRouter.post('/fixed-expenses/:id/pay', asyncRoute(async (req, res) => {
     const periodStart = expense.recurrence === 'weekly' ? 'week' : expense.recurrence === 'yearly' ? 'year' : 'month';
     const alreadyPaid = await client.query(
       `SELECT 1 FROM transactions
-       WHERE user_id = $1 AND fixed_expense_id = $2 AND source = 'despesa_fixa'
+       WHERE business_id = $1 AND fixed_expense_id = $2 AND source = 'despesa_fixa'
          AND occurred_at >= date_trunc($3, now()) LIMIT 1`,
       [user.id, expense.id, periodStart],
     );
     if (alreadyPaid.rowCount) throw Object.assign(new Error('Esta conta fixa já foi paga no período atual.'), { status: 409 });
 
     const openSession = await client.query(
-      `SELECT id FROM cash_sessions WHERE user_id = $1 AND status = 'open' FOR SHARE`,
+      `SELECT id FROM cash_sessions WHERE business_id = $1 AND status = 'open' FOR SHARE`,
       [user.id],
     );
     if (paymentMethod === 'dinheiro' && !openSession.rowCount) {
@@ -763,7 +908,7 @@ businessRouter.post('/cash-sessions', asyncRoute(async (req, res) => {
   const responsible = String(req.body?.responsible ?? '').trim() || user.email.split('@')[0];
 
   await withTenantTransaction(user.id, async (client) => {
-    const open = await client.query(`SELECT 1 FROM cash_sessions WHERE user_id = $1 AND status = 'open'`, [user.id]);
+    const open = await client.query(`SELECT 1 FROM cash_sessions WHERE business_id = $1 AND status = 'open'`, [user.id]);
     if (open.rowCount) throw Object.assign(new Error('Já existe um caixa aberto.'), { status: 409 });
     await client.query(
       `INSERT INTO cash_sessions (responsible, opening_balance) VALUES ($1, $2)`,
@@ -782,7 +927,7 @@ businessRouter.post('/cash-sessions/:id/close', asyncRoute(async (req, res) => {
   await withTenantTransaction(user.id, async (client) => {
     const sessionResult = await client.query(
       `SELECT id FROM cash_sessions
-       WHERE user_id = $1 AND id = $2 AND status = 'open'
+       WHERE business_id = $1 AND id = $2 AND status = 'open'
        FOR UPDATE`,
       [user.id, req.params.id],
     );
@@ -791,7 +936,7 @@ businessRouter.post('/cash-sessions/:id/close', asyncRoute(async (req, res) => {
     }
     const pendingResult = await client.query(
       `SELECT COUNT(*)::integer AS count FROM transactions
-       WHERE user_id = $1 AND cash_session_id = $2 AND identification_pending`,
+       WHERE business_id = $1 AND cash_session_id = $2 AND identification_pending`,
       [user.id, req.params.id],
     );
     const pendingCount = Number(pendingResult.rows[0].count);
@@ -818,7 +963,7 @@ businessRouter.post('/cash-sessions/:id/reopen', asyncRoute(async (req, res) => 
     const latestResult = await client.query(
       `SELECT id, status
        FROM cash_sessions
-       WHERE user_id = $1
+       WHERE business_id = $1
        ORDER BY opened_at DESC, created_at DESC, id DESC
        LIMIT 1
        FOR UPDATE`,
@@ -849,7 +994,7 @@ businessRouter.post('/cash-sessions/:id/reopen', asyncRoute(async (req, res) => 
            closing_balance = NULL,
            expected_balance = NULL,
            notes = concat_ws(E'\\n', NULLIF(notes, ''), '[correção] Fechamento reaberto em ' || now()::text)
-       WHERE user_id = $1 AND id = $2 AND status = 'closed'`,
+       WHERE business_id = $1 AND id = $2 AND status = 'closed'`,
       [user.id, req.params.id],
     );
   });

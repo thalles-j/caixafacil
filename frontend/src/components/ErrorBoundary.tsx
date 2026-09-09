@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { ArrowClockwise, WarningCircle } from '@phosphor-icons/react';
+import { captureFrontendError } from '../lib/observability';
 
 interface Props {
   children: ReactNode;
@@ -16,8 +17,8 @@ export default class ErrorBoundary extends Component<Props, State> {
     return { hasError: true };
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('Erro não tratado capturado pelo ErrorBoundary:', error, info.componentStack);
+  componentDidCatch(error: Error, _info: ErrorInfo) {
+    captureFrontendError(error);
   }
 
   render() {

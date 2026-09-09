@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { EnvelopeSimple, Headset, Key, PencilSimple, ShieldCheck, UserCircle } from '@phosphor-icons/react';
+import { EnvelopeSimple, Eye, EyeSlash, Headset, Key, PencilSimple, ShieldCheck, UserCircle } from '@phosphor-icons/react';
 import { Link } from 'react-router-dom';
 import Modal from '../../components/Modal';
 import {
@@ -33,6 +33,7 @@ export default function AdminSettings() {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPasswords, setShowPasswords] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -53,6 +54,7 @@ export default function AdminSettings() {
     setCurrentPassword('');
     setNewPassword('');
     setConfirmPassword('');
+    setShowPasswords(false);
     setConfirmationName('');
     setActionError(null);
     setSuccess(null);
@@ -169,10 +171,10 @@ export default function AdminSettings() {
           )}
           {action === 'password' && (
             <div className="space-y-3">
-              <label className="block"><span className="mb-1 block text-xs font-semibold text-ink-soft">Senha atual</span><input autoFocus type="password" maxLength={PASSWORD_MAX_LENGTH} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} className="w-full rounded-lg border border-line bg-paper p-2.5 text-sm text-ink outline-none focus:ring-2 focus:ring-ledger/30" /></label>
+              <label className="block"><span className="mb-1 block text-xs font-semibold text-ink-soft">Senha atual</span><span className="relative block"><input autoFocus type={showPasswords ? 'text' : 'password'} maxLength={PASSWORD_MAX_LENGTH} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} className="w-full rounded-lg border border-line bg-paper py-2.5 pl-2.5 pr-11 text-sm text-ink outline-none focus:ring-2 focus:ring-ledger/30" /><button type="button" onClick={() => setShowPasswords((visible) => !visible)} aria-label={showPasswords ? 'Ocultar senhas' : 'Mostrar senhas'} className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-ink-soft hover:text-ink">{showPasswords ? <Eye size={19} /> : <EyeSlash size={19} />}</button></span></label>
               <div className="grid gap-3 sm:grid-cols-2">
-                <label><span className="mb-1 block text-xs font-semibold text-ink-soft">Nova senha</span><input type="password" minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder={PASSWORD_HINT} className="w-full rounded-lg border border-line bg-paper p-2.5 text-sm text-ink outline-none focus:ring-2 focus:ring-ledger/30" /></label>
-                <label><span className="mb-1 block text-xs font-semibold text-ink-soft">Confirmar senha</span><input type="password" minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Digite novamente" className="w-full rounded-lg border border-line bg-paper p-2.5 text-sm text-ink outline-none focus:ring-2 focus:ring-ledger/30" /></label>
+                <label><span className="mb-1 block text-xs font-semibold text-ink-soft">Nova senha</span><input type={showPasswords ? 'text' : 'password'} minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder={PASSWORD_HINT} className="w-full rounded-lg border border-line bg-paper p-2.5 text-sm text-ink outline-none focus:ring-2 focus:ring-ledger/30" /></label>
+                <label><span className="mb-1 block text-xs font-semibold text-ink-soft">Confirmar senha</span><input type={showPasswords ? 'text' : 'password'} minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} placeholder="Digite novamente" className="w-full rounded-lg border border-line bg-paper p-2.5 text-sm text-ink outline-none focus:ring-2 focus:ring-ledger/30" /></label>
               </div>
             </div>
           )}

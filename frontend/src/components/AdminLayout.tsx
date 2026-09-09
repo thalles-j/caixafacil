@@ -1,4 +1,4 @@
-import { GearSix, SignOut, Storefront, UsersThree } from '@phosphor-icons/react';
+import { ClipboardText, GearSix, ShieldCheck, SignOut, Storefront, UsersThree } from '@phosphor-icons/react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -25,6 +25,18 @@ export default function AdminLayout() {
             >
               <UsersThree size={18} /> <span className="hidden sm:inline">Clientes</span>
             </NavLink>
+            <NavLink
+              to="/admin/auditoria"
+              className={({ isActive }) => `flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold ${isActive ? 'bg-ledger/10 text-ledger-strong dark:text-ledger' : 'text-ink-soft hover:bg-line/30 hover:text-ink'}`}
+            >
+              <ClipboardText size={18} /> <span className="hidden sm:inline">Auditoria</span>
+            </NavLink>
+            {user?.adminLevel === 'SUPERADMIN' && <NavLink
+              to="/admin/equipe"
+              className={({ isActive }) => `flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold ${isActive ? 'bg-ledger/10 text-ledger-strong dark:text-ledger' : 'text-ink-soft hover:bg-line/30 hover:text-ink'}`}
+            >
+              <ShieldCheck size={18} /> <span className="hidden sm:inline">Equipe</span>
+            </NavLink>}
             <NavLink
               to="/admin/configuracoes"
               className={({ isActive }) => `flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold ${isActive ? 'bg-ledger/10 text-ledger-strong dark:text-ledger' : 'text-ink-soft hover:bg-line/30 hover:text-ink'}`}

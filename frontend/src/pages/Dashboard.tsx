@@ -662,11 +662,16 @@ export default function Dashboard() {
         {emAltaHoje.length > 0 && (
           <div className="min-w-0">
             <h2 className="mb-3 text-sm font-bold uppercase tracking-wider text-ink-soft">Em Alta Hoje</h2>
-            <div className="scrollbar-hide flex gap-3 overflow-x-auto pb-2 lg:flex-wrap lg:overflow-visible">
+            <div
+              className="scrollbar-hide -mx-4 flex touch-pan-x snap-x snap-mandatory gap-3 overflow-x-scroll overscroll-x-contain px-4 pb-2 [-webkit-overflow-scrolling:touch] lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0"
+              role="region"
+              aria-label="Produtos em alta hoje; deslize para ver mais"
+              tabIndex={0}
+            >
               {emAltaHoje.map(([descricao, quantidade]) => (
                 <div
                   key={descricao}
-                  className="flex min-w-[110px] flex-1 flex-col items-center rounded-xl border border-line bg-paper-raised p-3 text-center shadow-sm lg:w-[140px] lg:min-w-[140px] lg:flex-none"
+                  className="flex w-[110px] shrink-0 snap-start flex-col items-center rounded-xl border border-line bg-paper-raised p-3 text-center shadow-sm lg:w-[140px]"
                 >
                   <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-ledger/10 text-ledger-strong dark:text-ledger">
                     <Package size={20} />

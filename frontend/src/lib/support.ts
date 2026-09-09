@@ -11,7 +11,7 @@ export type SupportMessage = {
 };
 
 export async function contactSupportRequest(data: SupportMessage): Promise<{ message: string }> {
-  const response = await fetch(`${API_URL}/support/contact`, {
+  const response = await observedFetch(`${API_URL}/support/contact`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -22,3 +22,4 @@ export async function contactSupportRequest(data: SupportMessage): Promise<{ mes
   }
   return body;
 }
+import { observedFetch } from './observability';

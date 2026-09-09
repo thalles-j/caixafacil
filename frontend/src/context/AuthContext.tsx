@@ -12,13 +12,25 @@ import {
   sessionRequest,
   setStoredToken,
   changePasswordRequest,
+  lockSessionRequest,
+  touchSessionRequest,
+  unlockSessionRequest,
+  lockStoredSession,
+  switchBusinessRequest,
 } from '../lib/auth';
-import { APP_DATA_CHANGED_EVENT } from '../lib/storage';
+import SessionLock from '../components/SessionLock';
+import { APP_DATA_CHANGED_EVENT, APP_TENANT_SWITCHING_EVENT } from '../lib/storage';
 
 interface AuthUser {
   id: string;
   email: string;
   role: 'client' | 'admin';
+  adminLevel?: 'SUPPORT' | 'SUPERADMIN' | 'REVOKED' | null;
+  name?: string | null;
+  tenantId?: string | null;
+  tenantRole?: 'OWNER' | 'OPERATOR' | null;
+  idleTimeoutMinutes?: number;
+  businessName?: string | null;
 }
 
 interface AuthContextValue {
@@ -30,6 +42,9 @@ interface AuthContextValue {
   resetAccountData: () => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string, confirmPassword: string) => Promise<string>;
   logout: () => Promise<void>;
+  locked: boolean;
+  unlock: (password: string) => Promise<void>;
+  switchBusiness: (businessId: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -37,6 +52,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [locked, setLocked] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,7 +72,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         if (cancelled) return;
         if ('token' in session && typeof session.token === 'string') setStoredToken(session.token);
-        window.dispatchEvent(new CustomEvent(APP_DATA_CHANGED_EVENT, { detail: session.data }));
+        if ('locked' in session && session.locked) {
+          lockStoredSession();
+          setLocked(true);
+        } else {
+          window.dispatchEvent(new CustomEvent(APP_DATA_CHANGED_EVENT, { detail: session.data }));
+        }
         setUser(session.user);
       } catch {
         if (cancelled) return;
@@ -75,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || locked) return;
     // O refresh token HTTP-only mantém a sessão. Este intervalo apenas renova o
     // access token quando necessário enquanto a aplicação permanece aberta.
     const interval = setInterval(() => {
@@ -95,7 +116,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }, 30_000);
     return () => clearInterval(interval);
-  }, [user]);
+  }, [user, locked]);
+
+  useEffect(() => {
+    if (!user || user.role !== 'client' || locked) return;
+    const timeout = Math.max(1, user.idleTimeoutMinutes ?? 15) * 60_000;
+    let timer = window.setTimeout(() => {
+      setLocked(true);
+      lockStoredSession();
+      void lockSessionRequest().catch(() => undefined);
+    }, timeout);
+    let lastTouch = 0;
+    const active = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => { setLocked(true); lockStoredSession(); void lockSessionRequest().catch(() => undefined); }, timeout);
+      if (Date.now() - lastTouch > 60_000) { lastTouch = Date.now(); void touchSessionRequest().catch(() => { lockStoredSession(); setLocked(true); }); }
+    };
+    const events: Array<keyof WindowEventMap> = ['pointerdown','keydown','touchstart'];
+    events.forEach(event => window.addEventListener(event, active, { passive: true }));
+    return () => { window.clearTimeout(timer); events.forEach(event => window.removeEventListener(event, active)); };
+  }, [user, locked]);
 
   const login = async (email: string, password: string) => {
     const tempoMinimoDeCarregamento = new Promise<void>((resolve) => window.setTimeout(resolve, 100));
@@ -124,7 +164,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearStoredToken();
       window.dispatchEvent(new Event(APP_DATA_CHANGED_EVENT));
       setUser(null);
+      setLocked(false);
     }
+  };
+
+  const unlock = async (password: string) => {
+    const session = await unlockSessionRequest(password);
+    setStoredToken(session.token);
+    window.dispatchEvent(new CustomEvent(APP_DATA_CHANGED_EVENT, { detail: session.data }));
+    setUser(session.user);
+    setLocked(false);
   };
 
   const resetAccountData = async () => {
@@ -138,6 +187,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return response.message;
   };
 
+  const switchBusiness = async (businessId: string) => {
+    const previousToken = getStoredToken();
+    window.dispatchEvent(new Event(APP_TENANT_SWITCHING_EVENT));
+    try {
+      const session = await switchBusinessRequest(businessId);
+      setStoredToken(session.token);
+      setUser(session.user);
+      window.dispatchEvent(new CustomEvent(APP_DATA_CHANGED_EVENT, { detail: session.data }));
+    } catch (error) {
+      if (previousToken) {
+        const previous = await sessionRequest(previousToken);
+        window.dispatchEvent(new CustomEvent(APP_DATA_CHANGED_EVENT, { detail: previous.data }));
+      }
+      throw error;
+    }
+  };
+
   const value: AuthContextValue = {
     user,
     isAuthenticated: user !== null,
@@ -147,9 +213,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     resetAccountData,
     changePassword,
     logout,
+    locked,
+    unlock,
+    switchBusiness,
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={value}>{children}{locked && user && <SessionLock onUnlock={unlock} onLogout={logout} />}</AuthContext.Provider>;
 }
 
 // eslint-disable-next-line react-refresh/only-export-components -- mesmo padrão já usado em AppDataContext

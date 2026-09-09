@@ -24,6 +24,9 @@ vi.mock('../context/AppDataContext', () => ({
     baixarDespesaFixa: vi.fn(),
   }),
 }));
+vi.mock('../context/AuthContext', () => ({
+  useAuth: () => ({ user: { tenantRole: 'OWNER' } }),
+}));
 
 afterEach(() => cleanup());
 

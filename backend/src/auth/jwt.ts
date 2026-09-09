@@ -30,6 +30,9 @@ export type TokenPayload = {
   email: string;
   ver: number;
   role: 'client' | 'admin';
+  tenantId?: string;
+  tenantRole?: 'OWNER' | 'OPERATOR';
+  sid?: string;
 };
 
 function assertTokenPayload(payload: string | jwt.JwtPayload): TokenPayload {
@@ -42,7 +45,11 @@ function assertTokenPayload(payload: string | jwt.JwtPayload): TokenPayload {
   ) {
     throw new jwt.JsonWebTokenError('Token sem os campos obrigatórios.');
   }
-  return { sub: payload.sub, email: payload.email, ver: payload.ver, role: payload.role };
+  if (payload.tenantRole !== undefined && payload.tenantRole !== 'OWNER' && payload.tenantRole !== 'OPERATOR') {
+    throw new jwt.JsonWebTokenError('Papel de loja inválido.');
+  }
+  return { sub: payload.sub, email: payload.email, ver: payload.ver, role: payload.role,
+    tenantId: payload.tenantId, tenantRole: payload.tenantRole, sid: payload.sid };
 }
 
 export function signToken(payload: TokenPayload) {

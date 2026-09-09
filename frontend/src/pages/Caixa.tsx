@@ -20,6 +20,13 @@ import { formatCurrency, parseMoney, sanitizeIntegerInput, sanitizeMoneyInput } 
 import { catalogTypesForOffer } from '../lib/offering';
 import type { Cliente, FormaPagamento } from '../types';
 import Modal from '../components/Modal';
+import { useAuth } from '../context/AuthContext';
+import { OfflineSalesQueue } from '../lib/offlineSales';
+import { registerOfflineSaleRequest, reportOfflineQueueStatus } from '../lib/business';
+import { APP_DATA_CHANGED_EVENT } from '../lib/storage';
+import OfflineStatus from '../components/OfflineStatus';
+import ReceiptActions from '../components/ReceiptActions';
+import { DEFAULT_RECEIPT_SETTINGS, type SaleReceipt } from '../lib/printing';
 
 interface ItemCarrinho {
   key: string;
@@ -34,6 +41,7 @@ interface ConfirmacaoCobranca {
   forma: FormaPagamento;
   quantidadeItens: number;
   cliente?: string;
+  receipt?: SaleReceipt;
 }
 
 type BrowserBarcodeDetector = {
@@ -48,10 +56,10 @@ const FORMAS: { forma: FormaPagamento; label: string; Icon: typeof Money; classe
 ];
 
 export default function Caixa() {
+  const { user, locked } = useAuth();
   const navigate = useNavigate();
   const {
     data,
-    registrarVendaNoBanco,
     cadastrarClienteNoBanco,
     abrirCaixa,
   } = useAppData();
@@ -75,6 +83,15 @@ export default function Caixa() {
   const [codigoScanner, setCodigoScanner] = useState('');
   const [scannerErro, setScannerErro] = useState<string | null>(null);
   const scannerVideoRef = useRef<HTMLVideoElement>(null);
+  const offlineQueue = useMemo(() => new OfflineSalesQueue({
+    getIdentity: () => !locked && user?.tenantId ? { tenantId: user.tenantId, actorId: user.id } : null,
+    send: async (sale, signal) => {
+      const response = await registerOfflineSaleRequest(sale.payload, signal);
+      window.dispatchEvent(new CustomEvent(APP_DATA_CHANGED_EVENT, { detail: response.data }));
+    },
+    reportStatus: reportOfflineQueueStatus,
+  }), [locked, user]);
+  useEffect(() => offlineQueue.start(), [offlineQueue]);
   const tiposCatalogoPermitidos = useMemo(
     () => catalogTypesForOffer(data.config?.oferta),
     [data.config?.oferta],
@@ -284,16 +301,22 @@ export default function Caixa() {
     setSalvando(true);
     setErroOperacao(null);
     try {
-      await registrarVendaNoBanco(
-        carrinho.map((item) => ({
+      const saleItems = carrinho.map((item) => ({
           productId: item.produtoId,
           description: item.descricao,
           quantity: item.quantidade,
           unitPrice: item.valorUnitario,
-        })),
-        formaCobranca,
-        formaCobranca === 'fiado' ? clienteSelecionado?.id : undefined,
-      );
+        }));
+      const cashSessionId = data.caixaAtual?.id;
+      if (!cashSessionId) throw new Error('Abra o caixa antes de registrar a venda.');
+      const pending = await offlineQueue.enqueue({ items: saleItems, paymentMethod: formaCobranca,
+        customerId: formaCobranca === 'fiado' ? clienteSelecionado?.id : undefined, cashSessionId }, {
+        businessName: data.config?.nome ?? 'CaixaFácil', operatorName: user?.name ?? user?.email ?? 'Operador',
+        paymentMethod: formaCobranca,
+        items: saleItems.map(item => ({ description: item.description, quantity: item.quantity, unitPrice: item.unitPrice })),
+      });
+      if (navigator.onLine) await offlineQueue.sync();
+      confirmacao.receipt = pending.receipt ? { ...pending.receipt, pendingSync: offlineQueue.getSnapshot().pending > 0 } : undefined;
       setCarrinho([]);
       setFormaSelecionada(null);
       setClienteSelecionado(null);
@@ -328,48 +351,56 @@ export default function Caixa() {
 
   return (
     <div className="fade-in">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h2 className="font-display text-xl font-bold">Frente de Caixa</h2>
-        <div className="flex items-center gap-3">
-          {caixa ? (
+      <section className="mb-5 overflow-hidden rounded-2xl border border-line bg-paper-raised shadow-sm">
+        <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <div className="min-w-0">
+            <h2 className="font-display text-2xl font-bold text-ink">Frente de Caixa</h2>
+            <div className="mt-2.5"><OfflineStatus queue={offlineQueue} /></div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => navigate('/caixa/fechamento')}
-              className="flex items-center gap-1 text-sm font-semibold text-stamp"
+              onClick={lerCodigo}
+              disabled={!caixa}
+              className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-ledger/25 bg-ledger/5 px-4 py-2 text-sm font-semibold text-ledger-strong transition hover:bg-ledger/10 disabled:cursor-not-allowed disabled:opacity-40 dark:text-ledger sm:flex-none"
             >
-              <LockKey size={18} /> Fechar Caixa
+              <Camera size={18} weight="bold" /> Ler código
             </button>
-          ) : (
-            <button
-              onClick={() => {
-                setErroOperacao(null);
-                setModalAbertura(true);
-              }}
-              className="flex items-center gap-1 text-sm font-semibold text-ledger-strong dark:text-ledger"
-            >
-              <Money size={18} /> Abrir Caixa
-            </button>
-          )}
-          <button
-            onClick={lerCodigo}
-            disabled={!caixa}
-            className="hidden items-center gap-1 text-sm font-medium text-ledger-strong disabled:opacity-40 dark:text-ledger sm:flex"
-          >
-            <Camera size={18} /> Ler Código
-          </button>
+            {caixa ? (
+              <button
+                onClick={() => navigate('/caixa/fechamento')}
+                className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-stamp/25 bg-stamp/5 px-4 py-2 text-sm font-semibold text-stamp transition hover:bg-stamp/10 sm:flex-none"
+              >
+                <LockKey size={18} weight="bold" /> Fechar caixa
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setErroOperacao(null);
+                  setModalAbertura(true);
+                }}
+                className="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-ledger px-4 py-2 text-sm font-bold text-paper transition hover:bg-ledger-strong sm:flex-none"
+              >
+                <Money size={18} weight="bold" /> Abrir caixa
+              </button>
+            )}
+          </div>
         </div>
-      </div>
 
-      {caixa ? (
-        <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-ledger/20 bg-ledger/5 px-3 py-2 text-xs">
-          <span className="font-semibold text-ledger-strong dark:text-ledger">Caixa aberto</span>
-          <span className="font-ledger text-ink-soft">Inicial: {formatCurrency(caixa.valorInicial)}</span>
-        </div>
-      ) : (
-        <div className="mb-3 rounded-xl border border-brass/30 bg-brass/10 p-3 text-sm text-ink">
-          <p className="font-semibold text-brass">O caixa está fechado.</p>
-          <p className="mt-1 text-xs text-ink-soft">Abra um novo caixa para registrar vendas e movimentações.</p>
-        </div>
-      )}
+        {caixa ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ledger/15 bg-ledger/5 px-4 py-3 sm:px-5">
+            <span className="inline-flex items-center gap-2 text-sm font-semibold text-ledger-strong dark:text-ledger">
+              <span className="h-2.5 w-2.5 rounded-full bg-ledger shadow-[0_0_0_4px_rgba(20,120,80,0.12)]" />
+              Caixa aberto
+            </span>
+            <span className="text-xs text-ink-soft">Saldo inicial <strong className="ml-1 font-ledger text-sm tabular-nums text-ink">{formatCurrency(caixa.valorInicial)}</strong></span>
+          </div>
+        ) : (
+          <div className="border-t border-brass/20 bg-brass/10 px-4 py-3 sm:px-5">
+            <p className="text-sm font-semibold text-brass">O caixa está fechado</p>
+            <p className="mt-1 text-xs text-ink-soft">Abra um novo caixa para registrar vendas e movimentações.</p>
+          </div>
+        )}
+      </section>
 
       {erroOperacao && !modalAbertura && (
         <div className="mb-3 flex items-start gap-2 rounded-xl bg-stamp/10 p-3 text-sm text-stamp">
@@ -685,6 +716,9 @@ export default function Caixa() {
                 </>
               )}
             </div>
+
+            {confirmacaoCobranca.receipt && <ReceiptActions receipt={confirmacaoCobranca.receipt}
+              settings={data.config?.receiptSettings ?? DEFAULT_RECEIPT_SETTINGS} />}
 
             <div className="flex gap-3">
               <button

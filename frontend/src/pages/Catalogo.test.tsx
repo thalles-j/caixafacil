@@ -29,6 +29,9 @@ vi.mock('../context/AppDataContext', () => ({
     removerCategoria: vi.fn(),
   }),
 }));
+vi.mock('../context/AuthContext', () => ({
+  useAuth: () => ({ user: { tenantRole: 'OWNER' } }),
+}));
 
 describe('modal de edição do Catálogo', () => {
   it('abre, troca o tipo e reabre repetidamente sem quebrar a tela', () => {

@@ -24,7 +24,8 @@ class ModalContentErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('Erro no conteúdo do modal:', error, info.componentStack);
+    void error;
+    void info;
   }
 
   render() {

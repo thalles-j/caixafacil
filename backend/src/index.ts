@@ -1,13 +1,20 @@
 import 'dotenv/config';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import cors from 'cors';
-import { ensureSchema } from './db.js';
+import { ensureSchema, pool } from './db.js';
 import { authRouter } from './auth/routes.js';
 import { accountRouter } from './account/routes.js';
 import { businessRouter } from './business/routes.js';
 import { securityHeaders } from './security.js';
 import { adminRouter } from './admin/routes.js';
 import { supportRouter } from './support/routes.js';
+import { privacyRouter } from './privacy/routes.js';
+import { operatorRouter } from './tenant/operators.js';
+import { businessesRouter } from './businesses/routes.js';
+import { monitorRouter } from './monitor/routes.js';
+import { captureFatalError, captureRequestError, initObservability, logEvent, requestObservability } from './observability.js';
+
+initObservability();
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
@@ -18,6 +25,7 @@ const allowedOrigins = (process.env.CORS_ORIGIN ?? 'http://localhost:5173')
   .filter(Boolean);
 
 app.disable('x-powered-by');
+app.use(requestObservability);
 if (!isDevelopment) app.set('trust proxy', 1);
 app.use(securityHeaders);
 
@@ -50,22 +58,35 @@ app.use(
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Authorization', 'Content-Type'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'X-Request-ID', 'traceparent'],
+    exposedHeaders: ['X-Request-ID', 'X-Trace-ID', 'X-Error-ID', 'traceparent'],
     maxAge: 600,
   }),
 );
 app.use('/api/account/backup', express.json({ limit: '10mb', strict: true }));
 app.use(express.json({ limit: '32kb', strict: true }));
 
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
+app.get('/api/health', async (_req, res, next) => {
+  try {
+    await pool.query('SELECT 1');
+    return res.json({ ok: true, database: 'ready' });
+  } catch (error) {
+    return next(error);
+  }
+});
 app.use('/api/auth', authRouter);
 app.use('/api/support', supportRouter);
+app.use('/api/monitor', monitorRouter);
 app.use('/api/account', accountRouter);
 app.use('/api/business', businessRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/privacy', privacyRouter);
+app.use('/api/operators', operatorRouter);
+app.use('/api/businesses', businessesRouter);
+app.use('/api', (_req, res) => res.status(404).json({ error: 'Rota não encontrada.' }));
 
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  console.error('Erro ao processar requisicao:', error);
+  captureRequestError(error, _req, res);
 
   const code =
     typeof error === 'object' && error !== null && 'code' in error
@@ -75,6 +96,17 @@ app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     typeof error === 'object' && error !== null && 'status' in error
       ? Number(error.status)
       : undefined;
+  const type =
+    typeof error === 'object' && error !== null && 'type' in error
+      ? String(error.type)
+      : undefined;
+
+  if (type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'JSON inválido.', code: 'INVALID_JSON' });
+  }
+  if (type === 'entity.too.large' || status === 413) {
+    return res.status(413).json({ error: 'Corpo da requisição excede o limite permitido.', code: 'PAYLOAD_TOO_LARGE' });
+  }
 
   if (status && status >= 400 && status < 500) {
     return res.status(status).json({
@@ -111,17 +143,11 @@ const prepareDatabase =
 
 prepareDatabase
   .then(() => {
-    const server = app.listen(PORT, () => console.log(`API rodando em http://localhost:${PORT}`));
+    const server = app.listen(PORT, () => logEvent('info', 'server_started', { port: Number(PORT) }));
     server.on('error', (error: NodeJS.ErrnoException) => {
-      if (error.code === 'EADDRINUSE') {
-        console.error(`A porta ${PORT} já está em uso. Encerre a API anterior e tente novamente.`);
-      } else {
-        console.error('Falha ao iniciar o servidor HTTP:', error);
-      }
-      process.exit(1);
+      void captureFatalError(error, 'server_error').finally(() => process.exit(1));
     });
   })
   .catch((err) => {
-    console.error('Falha ao preparar o banco de dados:', err);
-    process.exit(1);
+    void captureFatalError(err, 'database_error').finally(() => process.exit(1));
   });

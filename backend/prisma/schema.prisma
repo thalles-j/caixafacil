@@ -7,6 +7,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum tenant_role {
+  OWNER
+  OPERATOR
+}
+
 // RLS, triggers, views, constraints parciais e extensoes do Neon/Postgres
 // permanecem na migration SQL, pois nao possuem representacao completa no DSL.
 
@@ -16,6 +21,8 @@ model users {
   password_hash String
   token_version Int      @default(0)
   role          String   @default("client")
+  account_kind  String   @default("owner")
+  admin_level   String?
   status        String   @default("active")
   name          String?
   created_at    DateTime @default(now()) @db.Timestamptz(6)
@@ -26,6 +33,10 @@ model admin_audit_logs {
   id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   admin_user_id String?  @db.Uuid
   target_user_id String  @db.Uuid
+  user_id        String? @db.Uuid
+  business_id    String? @db.Uuid
+  actor_id       String? @db.Uuid
+  actor_role     String?
   action        String
   details       Json     @default("{}")
   created_at    DateTime @default(now()) @db.Timestamptz(6)
@@ -46,7 +57,8 @@ model password_reset_tokens {
 }
 
 model business_settings {
-  user_id              String   @id @db.Uuid
+  user_id              String   @db.Uuid
+  business_id          String   @id @default(dbgenerated("app_current_business_id()")) @db.Uuid
   business_name        String
   business_category    String
   offering             String   @default("ambos")
@@ -57,6 +69,8 @@ model business_settings {
   report_email         String?  @db.Citext
   view_period          String   @default("day")
   onboarding_completed Boolean  @default(false)
+  idle_timeout_minutes Int      @default(15)
+  receipt_settings     Json     @default("{\"paperWidth\":80,\"showOperator\":true,\"showPaymentMethod\":true}")
   created_at           DateTime @default(now()) @db.Timestamptz(6)
   updated_at           DateTime @default(now()) @db.Timestamptz(6)
 }
@@ -64,6 +78,7 @@ model business_settings {
 model categories {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id    String   @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  business_id String  @default(dbgenerated("app_current_business_id()")) @db.Uuid
   name       String
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
@@ -74,6 +89,7 @@ model categories {
 model products {
   id               String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id          String                   @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  business_id      String                   @default(dbgenerated("app_current_business_id()")) @db.Uuid
   category_id      String?                  @db.Uuid
   kind             String                   @default("product")
   name             String
@@ -96,10 +112,15 @@ model products {
 model customers {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id    String   @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  business_id String  @default(dbgenerated("app_current_business_id()")) @db.Uuid
   name       String
   phone      String?
   email      String?  @db.Citext
   notes      String?
+  whatsapp_consent_at          DateTime? @db.Timestamptz(6)
+  whatsapp_consent_version     String?
+  whatsapp_consent_recorded_by String?   @db.Uuid
+  anonymized_at                DateTime? @db.Timestamptz(6)
   created_at DateTime @default(now()) @db.Timestamptz(6)
   updated_at DateTime @default(now()) @db.Timestamptz(6)
 
@@ -109,6 +130,7 @@ model customers {
 model cash_sessions {
   id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id          String    @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  business_id      String    @default(dbgenerated("app_current_business_id()")) @db.Uuid
   responsible      String
   opened_at        DateTime  @default(now()) @db.Timestamptz(6)
   closed_at        DateTime? @db.Timestamptz(6)
@@ -128,6 +150,7 @@ model cash_sessions {
 model sales {
   id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id         String    @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  business_id     String    @default(dbgenerated("app_current_business_id()")) @db.Uuid
   cash_session_id String?   @db.Uuid
   customer_id     String?   @db.Uuid
   description     String?
@@ -136,6 +159,11 @@ model sales {
   total_amount    Decimal   @db.Decimal(14, 2)
   sold_at         DateTime  @default(now()) @db.Timestamptz(6)
   cancelled_at    DateTime? @db.Timestamptz(6)
+  actor_id         String?   @db.Uuid
+  actor_name       String?
+  client_sale_id   String?   @db.Uuid
+  request_hash     String?
+  returned_amount  Decimal   @default(0) @db.Decimal(14, 2)
   created_at      DateTime  @default(now()) @db.Timestamptz(6)
   updated_at      DateTime  @default(now()) @db.Timestamptz(6)
 
@@ -144,11 +172,13 @@ model sales {
   @@index([user_id, cash_session_id, sold_at(sort: Desc)], map: "idx_sales_user_session_sold")
   @@index([user_id, customer_id, sold_at(sort: Desc)], map: "idx_sales_user_customer_sold")
   @@index([user_id, payment_method, status], map: "idx_sales_user_payment_status")
+  @@unique([user_id, client_sale_id], map: "sales_idempotency")
 }
 
 model sale_items {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id      String   @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  business_id  String   @default(dbgenerated("app_current_business_id()")) @db.Uuid
   sale_id      String   @db.Uuid
   product_id   String?  @db.Uuid
   product_name String
@@ -156,6 +186,7 @@ model sale_items {
   unit_price   Decimal  @db.Decimal(14, 2)
   unit_cost    Decimal  @default(0) @db.Decimal(14, 2)
   total_amount Decimal  @default(dbgenerated()) @db.Decimal(14, 2)
+  returned_quantity Decimal @default(0) @db.Decimal(14, 3)
   created_at   DateTime @default(now()) @db.Timestamptz(6)
 
   @@unique([user_id, id], map: "uq_sale_items_tenant_id")
@@ -166,6 +197,7 @@ model sale_items {
 model fixed_expenses {
   id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id       String    @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  business_id   String    @default(dbgenerated("app_current_business_id()")) @db.Uuid
   description   String
   amount        Decimal   @db.Decimal(14, 2)
   recurrence    String    @default("monthly")
@@ -184,10 +216,12 @@ model fixed_expenses {
 model credit_sales {
   id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id     String    @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  business_id String    @default(dbgenerated("app_current_business_id()")) @db.Uuid
   sale_id     String    @db.Uuid
   customer_id String    @db.Uuid
   amount      Decimal   @db.Decimal(14, 2)
   paid_amount Decimal   @default(0) @db.Decimal(14, 2)
+  returned_amount Decimal @default(0) @db.Decimal(14, 2)
   status      String    @default("pendente")
   due_date    DateTime? @db.Date
   paid_at     DateTime? @db.Timestamptz(6)
@@ -201,9 +235,37 @@ model credit_sales {
   @@index([user_id, created_at(sort: Desc)], map: "idx_credit_sales_user_created")
 }
 
+model tenant_memberships {
+  actor_id   String      @id @db.Uuid
+  user_id    String      @db.Uuid
+  role       tenant_role
+  active     Boolean     @default(true)
+  created_at DateTime    @default(now()) @db.Timestamptz(6)
+}
+
+model auth_sessions {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id          String    @db.Uuid
+  actor_id         String    @db.Uuid
+  business_id      String?   @db.Uuid
+  last_activity_at DateTime  @default(now()) @db.Timestamptz(6)
+  locked_at        DateTime? @db.Timestamptz(6)
+  expires_at       DateTime  @default(dbgenerated("now() + interval '30 days'")) @db.Timestamptz(6)
+}
+
+model privacy_erasure_tombstones {
+  user_id       String   @db.Uuid
+  business_id   String   @default(dbgenerated("app_current_business_id()")) @db.Uuid
+  customer_id   String   @db.Uuid
+  anonymized_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@id([business_id, customer_id])
+}
+
 model transactions {
   id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id                String   @default(dbgenerated("app_current_user_id()")) @db.Uuid
+  business_id            String   @default(dbgenerated("app_current_business_id()")) @db.Uuid
   cash_session_id        String?  @db.Uuid
   sale_id                String?  @db.Uuid
   fixed_expense_id       String?  @db.Uuid
@@ -224,4 +286,45 @@ model transactions {
   @@index([user_id, occurred_at(sort: Desc)], map: "idx_transactions_user_occurred")
   @@index([user_id, cash_session_id, occurred_at(sort: Desc)], map: "idx_transactions_user_session_occurred")
   @@index([user_id, source, occurred_at(sort: Desc)], map: "idx_transactions_user_source_occurred")
+}
+
+model businesses {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_user_id String    @db.Uuid
+  name          String
+  category      String    @default("Outros")
+  offering      String    @default("ambos")
+  archived_at   DateTime? @db.Timestamptz(6)
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime  @default(now()) @db.Timestamptz(6)
+}
+
+model business_memberships {
+  user_id     String      @db.Uuid
+  business_id String      @db.Uuid
+  role        tenant_role
+  active      Boolean     @default(true)
+  created_at  DateTime    @default(now()) @db.Timestamptz(6)
+
+  @@id([user_id, business_id])
+  @@index([business_id, role, active], map: "idx_business_memberships_business")
+}
+
+model offline_queue_status {
+  business_id       String    @db.Uuid
+  actor_id          String    @db.Uuid
+  pending_count     Int       @default(0)
+  oldest_pending_at DateTime? @db.Timestamptz(6)
+  updated_at        DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@id([business_id, actor_id])
+}
+
+model platform_monitor_status {
+  monitor_name String   @id
+  healthy      Boolean
+  http_status  String
+  simulated    Boolean  @default(false)
+  checked_at   DateTime @db.Timestamptz(6)
+  received_at  DateTime @default(now()) @db.Timestamptz(6)
 }

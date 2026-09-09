@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { ADMIN_BUSINESS_TABLES_TO_CLEAR, ADMIN_PASSWORD, ADMIN_USERS, DEMO_USERS } from '../prisma/seedData.js';
+import {
+  ADMIN_BUSINESS_TABLES_TO_CLEAR, ADMIN_PASSWORD, ADMIN_USERS, DEMO_BUSINESSES,
+  DEMO_USERS, OPERATOR_PASSWORD,
+} from '../prisma/seedData.js';
 
 describe('seed administrativo', () => {
   it('define as três contas admin com a senha solicitada', () => {
@@ -9,6 +12,13 @@ describe('seed administrativo', () => {
       { name: 'Gustavo', email: 'gustavo@admin.com', role: 'admin' },
       { name: 'Marco', email: 'marco@admin.com', role: 'admin' },
     ]);
+  });
+
+  it('representa os três negócios e as credenciais de operador da demonstração rica', () => {
+    expect(OPERATOR_PASSWORD).toBe('Operador123@');
+    expect(DEMO_BUSINESSES).toHaveLength(3);
+    expect(new Set(DEMO_BUSINESSES.map((business) => business.key)).size).toBe(3);
+    expect(DEMO_BUSINESSES.every((business) => business.name && business.category && business.offering)).toBe(true);
   });
 
   it('não mistura e-mails admin com clientes e limpa todas as tabelas de demonstração', () => {

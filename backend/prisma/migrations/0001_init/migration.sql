@@ -162,8 +162,11 @@ CREATE TABLE IF NOT EXISTS categories (
 COMMENT ON TABLE categories IS
   'Colecoes de produtos criadas pelo comerciante, isoladas por user_id.';
 
-CREATE UNIQUE INDEX IF NOT EXISTS uq_categories_user_name_ci
-  ON categories (user_id, lower(name));
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='categories' AND column_name='business_id') THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_categories_user_name_ci ON categories (user_id, lower(name));
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS products (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -205,8 +208,11 @@ CREATE INDEX IF NOT EXISTS idx_products_user_category
   ON products (user_id, category_id);
 CREATE INDEX IF NOT EXISTS idx_products_user_name
   ON products (user_id, lower(name));
-CREATE UNIQUE INDEX IF NOT EXISTS uq_products_user_barcode
-  ON products (user_id, barcode) WHERE barcode IS NOT NULL;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='products' AND column_name='business_id') THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_products_user_barcode ON products (user_id, barcode) WHERE barcode IS NOT NULL;
+  END IF;
+END $$;
 
 -- ============================================================
 -- CLIENTES
@@ -266,8 +272,11 @@ CREATE INDEX IF NOT EXISTS idx_cash_sessions_user_opened
   ON cash_sessions (user_id, opened_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cash_sessions_user_closed
   ON cash_sessions (user_id, closed_at DESC) WHERE closed_at IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_cash_sessions_one_open_per_user
-  ON cash_sessions (user_id) WHERE status = 'open';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='cash_sessions' AND column_name='business_id') THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_cash_sessions_one_open_per_user ON cash_sessions (user_id) WHERE status = 'open';
+  END IF;
+END $$;
 
 -- ============================================================
 -- VENDAS E ITENS
@@ -538,8 +547,11 @@ CREATE INDEX IF NOT EXISTS idx_transactions_user_pending
 CREATE INDEX IF NOT EXISTS idx_transactions_user_credit_occurred
   ON transactions (user_id, credit_sale_id, occurred_at DESC)
   WHERE credit_sale_id IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_transactions_immediate_sale
-  ON transactions (user_id, sale_id) WHERE source = 'venda';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='transactions' AND column_name='business_id') THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_transactions_immediate_sale ON transactions (user_id, sale_id) WHERE source = 'venda';
+  END IF;
+END $$;
 
 -- ============================================================
 -- TRIGGERS DE INTEGRIDADE E AUDITORIA
@@ -867,7 +879,8 @@ GROUP BY user_id, (occurred_at AT TIME ZONE 'UTC')::DATE;
 COMMENT ON VIEW daily_balance IS
   'Entradas, saidas e saldo por dia UTC. Fiado pendente inexiste em transactions e portanto nao aparece.';
 
-CREATE OR REPLACE VIEW cash_session_report
+DROP VIEW IF EXISTS cash_session_report;
+CREATE VIEW cash_session_report
 WITH (security_invoker = true)
 AS
 SELECT
@@ -894,7 +907,8 @@ GROUP BY cs.user_id, cs.id;
 COMMENT ON VIEW cash_session_report IS
   'Resumo historico de entradas, saidas e saldo agrupado por sessao de caixa.';
 
-CREATE OR REPLACE VIEW credit_receivables
+DROP VIEW IF EXISTS credit_receivables;
+CREATE VIEW credit_receivables
 WITH (security_invoker = true)
 AS
 SELECT
