@@ -55,6 +55,30 @@ export async function recordConsentHandler(req: Request, res: Response) {
   return res.json({ consent });
 }
 
+export async function getConsentStatusHandler(req: Request, res: Response) {
+  const identity = actor(res);
+  const id = customerId(req);
+  const result = await withTenantTransaction(identity.tenantId, async (client) => {
+    const found = await client.query(
+      `SELECT whatsapp_consent_at, whatsapp_consent_version, whatsapp_consent_recorded_by
+       FROM customers WHERE business_id = $1 AND id = $2`,
+      [identity.tenantId, id],
+    );
+    const customer = found.rows[0];
+    if (!customer) throw fail('Cliente não encontrado.', 404);
+    return {
+      granted: Boolean(
+        customer.whatsapp_consent_at
+          && customer.whatsapp_consent_recorded_by
+          && customer.whatsapp_consent_version === WHATSAPP_CONSENT_VERSION,
+      ),
+      recordedAt: customer.whatsapp_consent_at,
+      version: customer.whatsapp_consent_version,
+    };
+  });
+  return res.json({ consent: result });
+}
+
 export async function whatsappChargeHandler(req: Request, res: Response) {
   const identity = actor(res);
   const id = customerId(req);
@@ -124,6 +148,7 @@ export async function anonymizeCustomerHandler(req: Request, res: Response) {
 export const privacyRouter = Router();
 privacyRouter.use(authenticateAccessToken, requireClient);
 privacyRouter.get('/consent-text', (_req, res) => res.json({ version: WHATSAPP_CONSENT_VERSION, text: WHATSAPP_CONSENT_TEXT }));
+privacyRouter.get('/customers/:id/whatsapp-consent', asyncRoute(getConsentStatusHandler));
 privacyRouter.post('/customers/:id/whatsapp-consent', asyncRoute(recordConsentHandler));
 privacyRouter.post('/customers/:id/whatsapp-charge', asyncRoute(whatsappChargeHandler));
 privacyRouter.delete('/customers/:id/personal-data', requireTenantRole('OWNER'), asyncRoute(anonymizeCustomerHandler));

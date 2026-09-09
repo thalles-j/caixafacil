@@ -3,6 +3,7 @@ import { observedFetch } from './observability';
 
 const API_URL = import.meta.env.VITE_API_URL ?? '/api';
 export type ConsentText = { version: string; text: string };
+export type ConsentStatus = { granted: boolean; recordedAt?: string; version?: string };
 
 async function privacyRequest<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const token = await ensureStoredAccessToken();
@@ -18,6 +19,8 @@ async function privacyRequest<T>(path: string, method = 'GET', body?: unknown): 
 }
 
 export const getConsentText = () => privacyRequest<ConsentText>('/consent-text');
+export const getWhatsAppConsentStatus = (customerId: string) =>
+  privacyRequest<{ consent: ConsentStatus }>(`/customers/${encodeURIComponent(customerId)}/whatsapp-consent`);
 export const recordWhatsAppConsent = (customerId: string, granted: boolean, version: string) =>
   privacyRequest(`/customers/${encodeURIComponent(customerId)}/whatsapp-consent`, 'POST', { granted, version });
 export const getWhatsAppCharge = (customerId: string) =>
