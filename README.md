@@ -60,11 +60,18 @@ flowchart LR
     A -.-> S
 ```
 
-O repositório é um monorepo npm com dois workspaces:
+O repositório contém dois projetos npm independentes:
 
-- `frontend/`: React 19, TypeScript, Vite, Tailwind CSS e React Router;
-- `backend/`: Express, TypeScript, Prisma, PostgreSQL, JWT e bcrypt;
+- [`frontend/`](frontend/): React 19, TypeScript, Vite, Tailwind CSS e React Router.
+  Ele possui seu próprio `package.json`, `package-lock.json` e variáveis `VITE_*`.
+- [`backend/`](backend/): Express, TypeScript, Prisma, PostgreSQL, JWT e bcrypt.
+  Ele possui seu próprio `package.json`, `package-lock.json` e variáveis do servidor.
 - `docs/`: auditoria técnica e roteiros de PDV, privacidade e observabilidade.
+
+O frontend não importa código do backend e o backend não importa código do
+frontend. A comunicação entre eles acontece somente pela API HTTP configurada
+em `frontend/.env`. Os arquivos `.env` são locais a cada projeto e nunca são
+compartilhados.
 
 A API mantém o access token em memória e o refresh token em cookie HTTP-only.
 Toda requisição autenticada revalida o vínculo do usuário com o negócio ativo.
@@ -83,6 +90,9 @@ As consultas usam transações por tenant e políticas RLS forçadas no banco.
 ```bash
 git clone https://github.com/thalles-j/caixafacil.git
 cd caixafacil
+cd backend
+npm ci
+cd ..\frontend
 npm ci
 ```
 
@@ -98,29 +108,38 @@ Copy-Item backend/.env.example backend/.env
 Copy-Item frontend/.env.example frontend/.env
 ```
 
-Preencha ao menos `DATABASE_URL`, `JWT_ACCESS_SECRET` e `JWT_REFRESH_SECRET`.
-Use segredos longos, aleatórios e diferentes. Em desenvolvimento, o frontend
-usa `/api` e o proxy do Vite encaminha as chamadas para a porta `3000`.
+Preencha ao menos `DATABASE_URL`, `JWT_ACCESS_SECRET` e `JWT_REFRESH_SECRET`
+no backend. No frontend, configure `VITE_API_URL` com a URL HTTP pública da API
+(por exemplo, `http://localhost:3000/api`). Use segredos longos, aleatórios e
+diferentes.
 
 ### 3. Prepare o banco
 
 ```bash
+cd backend
 npm run db:schema
-npm run db:seed
+npm run seed
 ```
 
 ### 4. Inicie a aplicação
 
 ```bash
+cd backend
+npm run dev
+```
+
+- API: <http://localhost:3000/api>
+- Health check: <http://localhost:3000/api/health>
+
+Em outro terminal, inicie o frontend:
+
+```bash
+cd frontend
 npm run dev
 ```
 
 - Frontend: <http://localhost:5173>
 - API: <http://localhost:3000/api>
-- Health check: <http://localhost:3000/api/health>
-
-Também é possível executar somente um workspace com `npm run dev:frontend` ou
-`npm run dev:backend`.
 
 ## Dados de demonstração
 
@@ -128,7 +147,8 @@ O seed padrão é não destrutivo. Para recriar apenas as contas de demonstraç�
 preservar os demais usuários do banco:
 
 ```bash
-npm run db:seed -- --refresh-demo
+cd backend
+npm run seed -- --refresh-demo
 ```
 
 Cada proprietário recebe três negócios completos. A massa inclui produtos e
@@ -160,7 +180,8 @@ produção.
 Para apagar todo o conteúdo do banco configurado e recriar a massa:
 
 ```bash
-npm run db:seed -- --reset
+cd backend
+npm run seed -- --reset
 ```
 
 Esse comando é destrutivo e deve ser usado somente em um banco de
@@ -168,15 +189,19 @@ desenvolvimento ou demonstração.
 
 ## Comandos úteis
 
-| Comando | Finalidade |
-| --- | --- |
-| `npm run dev` | Inicia frontend e backend |
-| `npm run build` | Gera os builds de produção |
-| `npm run lint` | Valida TypeScript e ESLint |
-| `npm test` | Executa os testes automatizados |
-| `npm run db:schema` | Aplica as migrations SQL |
-| `npm run db:seed` | Cria ou atualiza os dados de demonstração |
-| `npm run prisma:validate --workspace backend` | Valida o schema Prisma |
+| Projeto | Comando | Finalidade |
+| --- | --- | --- |
+| Backend | `npm run dev` | Inicia a API |
+| Backend | `npm run build` | Gera o build da API |
+| Backend | `npm run lint` | Valida o TypeScript |
+| Backend | `npm test` | Executa os testes da API |
+| Backend | `npm run db:schema` | Aplica as migrations SQL |
+| Backend | `npm run seed` | Cria ou atualiza os dados de demonstração |
+| Backend | `npm run prisma:validate` | Valida o schema Prisma |
+| Frontend | `npm run dev` | Inicia a aplicação web |
+| Frontend | `npm run build` | Gera o build web |
+| Frontend | `npm run lint` | Valida o ESLint |
+| Frontend | `npm test` | Executa os testes da aplicação |
 
 O CI executa instalação limpa, validação do Prisma, lint, build e testes em cada
 push para `main` e em pull requests.
@@ -200,8 +225,15 @@ técnicos e precisam de revisão jurídica antes de uma publicação comercial.
 ## Validação antes do deploy
 
 ```bash
+cd backend
 npm ci
-npm run prisma:validate --workspace backend
+npm run prisma:validate
+npm run lint
+npm test
+npm run build
+
+cd ..\frontend
+npm ci
 npm run lint
 npm test
 npm run build
@@ -209,7 +241,7 @@ npm run build
 
 Para hospedar frontend e API em origens diferentes:
 
-1. publique o backend Node e inicie-o com `npm start --workspace backend`;
+1. publique o backend Node a partir da pasta `backend/` e inicie-o com `npm start`;
 2. configure `CORS_ORIGIN` e `FRONTEND_URL` com a URL HTTPS do frontend;
 3. configure `REFRESH_COOKIE_SAME_SITE=none`;
 4. gere o frontend com `VITE_API_URL=https://sua-api.example/api`;
@@ -235,15 +267,18 @@ responsável por essa etapa.
 caixafacil/
 ├── .github/workflows/   # CI e monitor de disponibilidade
 ├── backend/
+│   ├── package.json     # Projeto de API independente
+│   ├── package-lock.json
 │   ├── prisma/          # Schema, migrations e seed
 │   ├── src/             # API, autenticação e regras de negócio
+│   ├── scripts/         # Monitor externo de disponibilidade
 │   └── tests/           # Testes do backend
 ├── docs/                # Documentação operacional e auditoria
 ├── frontend/
+│   ├── package.json     # Projeto web independente
+│   ├── package-lock.json
 │   ├── public/          # Ícones e arquivos públicos
-│   └── src/             # Páginas, componentes, contextos e bibliotecas
-├── package.json         # Scripts e workspaces do monorepo
-└── package-lock.json
+    └── src/             # Páginas, componentes, contextos e bibliotecas
 ```
 
 ## Suporte

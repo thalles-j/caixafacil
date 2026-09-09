@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { runUptimeCheck } from '../../scripts/uptime-monitor.mjs';
+import { runUptimeCheck } from '../scripts/uptime-monitor.mjs';
 
 const env = {
   UPTIME_HEALTH_URL: 'https://api.example.com/api/health',

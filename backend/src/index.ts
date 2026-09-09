@@ -18,6 +18,7 @@ initObservability();
 
 const app = express();
 const PORT = process.env.PORT ?? 3000;
+const BACKEND_URL = (process.env.BACKEND_URL ?? `http://localhost:${PORT}`).replace(/\/$/, '');
 const isDevelopment = process.env.NODE_ENV === 'development';
 const allowedOrigins = (process.env.CORS_ORIGIN ?? 'http://localhost:5173')
   .split(',')
@@ -143,7 +144,10 @@ const prepareDatabase =
 
 prepareDatabase
   .then(() => {
-    const server = app.listen(PORT, () => logEvent('info', 'server_started', { port: Number(PORT) }));
+    const server = app.listen(PORT, () => {
+      logEvent('info', 'server_started', { port: Number(PORT) });
+      process.stdout.write(`Backend disponível em ${BACKEND_URL}\nAPI disponível em ${BACKEND_URL}/api\n`);
+    });
     server.on('error', (error: NodeJS.ErrnoException) => {
       void captureFatalError(error, 'server_error').finally(() => process.exit(1));
     });

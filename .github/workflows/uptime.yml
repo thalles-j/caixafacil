@@ -28,6 +28,7 @@ jobs:
         with:
           node-version: 22
       - name: Verificar API e alertar por e-mail
+        working-directory: backend
         run: node scripts/uptime-monitor.mjs
         env:
           UPTIME_HEALTH_URL: ${{ vars.UPTIME_HEALTH_URL }}

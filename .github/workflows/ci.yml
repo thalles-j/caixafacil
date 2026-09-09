@@ -15,11 +15,36 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
 
-      - run: npm ci
-      - run: npm run prisma:validate --workspace backend
+      - name: Instalar backend
+        working-directory: backend
+        run: npm ci
+      - name: Instalar frontend
+        working-directory: frontend
+        run: npm ci
+      - name: Validar Prisma
+        working-directory: backend
+        run: npm run prisma:validate
         env:
-          DATABASE_URL: postgresql://user:password@localhost:5432/caixafacil
-      - run: npm run lint
-      - run: npm run build
-      - run: npm test
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/caixafacil
+      - name: Lint backend
+        working-directory: backend
+        run: npm run lint
+      - name: Lint frontend
+        working-directory: frontend
+        run: npm run lint
+      - name: Build backend
+        working-directory: backend
+        run: npm run build
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Test backend
+        working-directory: backend
+        run: npm test
+      - name: Test frontend
+        working-directory: frontend
+        run: npm test
