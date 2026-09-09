@@ -7,6 +7,7 @@ import AdminRoute from './components/AdminRoute';
 
 const Layout = lazy(() => import('./components/Layout'));
 const Landing = lazy(() => import('./pages/Landing'));
+const NotFound = lazy(() => import('./pages/NotFound'));
 const Login = lazy(() => import('./pages/Login'));
 const Cadastro = lazy(() => import('./pages/Cadastro'));
 const RecuperarConta = lazy(() => import('./pages/RecuperarConta'));
@@ -59,7 +60,7 @@ export default function App() {
           <Route path="/termos" element={<Termos />} />
           <Route path="/privacidade" element={<Privacidade />} />
           <Route path="/admin/*" element={<Navigate to="/login" replace />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
     );
@@ -77,7 +78,7 @@ export default function App() {
             <Route path="/admin/auditoria" element={<AdminAudit />} />
             <Route path="/admin/equipe" element={user.adminLevel === 'SUPERADMIN' ? <AdminTeam /> : <Navigate to="/admin" replace />} />
           </Route>
-          <Route path="*" element={<Navigate to="/admin" replace />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
     );
@@ -131,7 +132,7 @@ export default function App() {
           <Route path="/termos" element={<Termos />} />
           <Route path="/privacidade" element={<Privacidade />} />
           <Route path="/admin/*" element={<Navigate to="/dashboard" replace />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFound />} />
         </Route>
       </Routes>
     </Suspense>
