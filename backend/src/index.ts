@@ -20,10 +20,16 @@ const app = express();
 const PORT = process.env.PORT ?? 3000;
 const BACKEND_URL = (process.env.BACKEND_URL ?? `http://localhost:${PORT}`).replace(/\/$/, '');
 const isDevelopment = process.env.NODE_ENV === 'development';
-const allowedOrigins = (process.env.CORS_ORIGIN ?? 'http://localhost:5173')
-  .split(',')
+const configuredOrigins = [process.env.CORS_ORIGIN, process.env.FRONTEND_URL]
+  .filter((origins): origins is string => Boolean(origins))
+  .flatMap((origins) => origins.split(','))
   .map((origin) => origin.trim())
+  .map((origin) => origin.replace(/\/$/, ''))
   .filter(Boolean);
+const allowedOrigins = [
+  ...configuredOrigins,
+  ...(isDevelopment ? [] : ['https://www.caixafacil.site', 'https://caixafacil.site']),
+];
 
 app.disable('x-powered-by');
 app.use(requestObservability);

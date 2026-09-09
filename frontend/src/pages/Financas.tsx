@@ -383,11 +383,11 @@ export default function Financas() {
                   return (
                     <li
                       key={conta.id}
-                      className={`flex items-center justify-between gap-3 p-4 ${conta.quitado ? 'opacity-60' : ''} ${
+                      className={`flex flex-col items-stretch justify-between gap-3 p-4 sm:flex-row sm:items-center ${conta.quitado ? 'opacity-60' : ''} ${
                         atrasada ? 'bg-stamp/5' : ''
                       }`}
                     >
-                      <div className="flex min-w-0 flex-1 items-center gap-3">
+                      <div className="flex w-full min-w-0 flex-1 items-center gap-3 sm:w-auto">
                         <div
                           className={`shrink-0 rounded-lg p-2 ${
                             conta.quitado
@@ -432,7 +432,7 @@ export default function Financas() {
                           </div>
                         </div>
                       </div>
-                      <div className="flex shrink-0 flex-col items-end gap-1 text-right">
+                      <div className="flex w-full shrink-0 flex-row items-center justify-between gap-2 text-right sm:w-auto sm:flex-col sm:items-end sm:gap-1">
                         <p className={`font-ledger font-bold tabular-nums text-ink ${conta.quitado ? 'text-ink-soft line-through' : ''}`}>
                           {formatCurrency(conta.valor)}
                         </p>

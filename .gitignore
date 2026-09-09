@@ -11,6 +11,7 @@ node_modules/
 dist/
 dist-ssr
 *.local
+backend/
 
 # Env files (contain secrets — never commit)
 .env
