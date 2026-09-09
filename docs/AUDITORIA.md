@@ -6,7 +6,8 @@ frontend.
 
 ## Arquitetura
 
-- Monorepo npm com workspaces independentes em `frontend/` e `backend/`.
+- Dois projetos npm independentes em `frontend/` e `backend`, cada um com seu
+  `package.json`, `package-lock.json` e `.env`.
 - Frontend React 19, TypeScript, Vite, Tailwind e React Router.
 - Backend Express/TypeScript com autenticação JWT, access token em memória e
   refresh token em cookie HTTP-only.
@@ -126,8 +127,15 @@ frontend.
 ## Validação recomendada antes do deploy
 
 ```bash
+cd backend
 npm ci
-npm run prisma:validate --workspace backend
+npm run prisma:validate
+npm run lint
+npm test
+npm run build
+
+cd ..\frontend
+npm ci
 npm run lint
 npm test
 npm run build
